@@ -1,0 +1,5 @@
+[Ether]
+addr = "ws://localhost:8545"
+contract_address = "0xd8e4c166270ebf8e6d33b948f459caf3bf7b66b4"
+abi_path = "broker.abi"
+key_path = "ether.json"
