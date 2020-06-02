@@ -46,7 +46,7 @@ contract Transfer {
         accountM[id] = amount;
     }
 
-    function parseInt(string memory self) public pure returns (uint _ret) {
+    function parseInt(string memory self) internal pure returns (uint _ret) {
         bytes memory _bytesValue = bytes(self);
         uint j = 1;
         for(uint i = _bytesValue.length-1; i >= 0 && i < _bytesValue.length; i--) {

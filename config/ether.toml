@@ -1,5 +1,7 @@
 [Ether]
-addr = "ws://localhost:8545"
-contract_address = "0xd8e4c166270ebf8e6d33b948f459caf3bf7b66b4"
+addr = "ws://localhost:8546"
+name = "ether"
+contract_address = "0x639285a4a610833c5C50B0e562D9d38f1B628c06"
 abi_path = "broker.abi"
-key_path = "ether.json"
+key_path = "account.key"
+password = "password"

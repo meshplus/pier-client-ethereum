@@ -13,7 +13,6 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/sirupsen/logrus v1.5.0
 	github.com/spf13/viper v1.6.1
-	github.com/stretchr/testify v1.4.0
 )
 
 replace golang.org/x/sys => golang.org/x/sys v0.0.0-20200509044756-6aff5f38e54f
