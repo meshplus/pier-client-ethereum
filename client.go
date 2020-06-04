@@ -3,8 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/ecdsa"
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"math/big"
@@ -17,9 +15,9 @@ import (
 	"github.com/Rican7/retry/strategy"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/meshplus/bitxhub-kit/log"
@@ -42,10 +40,6 @@ type Client struct {
 	conn      *rpc.Client
 	eventC    chan *pb.IBTP
 	pierID    string
-}
-
-type EtherAccount struct {
-	PrivateKeys map[string]string `json:"private_keys"`
 }
 
 var (
@@ -72,28 +66,25 @@ func NewClient(configPath string, pierID string, extra []byte) (client.Client, e
 		return nil, fmt.Errorf("dial ethereum node: %w", err)
 	}
 
-	p := filepath.Join(configPath, cfg.Ether.KeyPath)
-	keyByte, err := ioutil.ReadFile(p)
+	keyPath := filepath.Join(configPath, cfg.Ether.KeyPath)
+	keyByte, err := ioutil.ReadFile(keyPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load key store: %w", err)
+		return nil, err
 	}
 
-	accounts := &EtherAccount{}
-	if err := json.Unmarshal(keyByte, accounts); err != nil {
-		return nil, fmt.Errorf("unmarshal ether account from json file: %w", err)
+	psdPath := filepath.Join(configPath, cfg.Ether.Password)
+	password, err := ioutil.ReadFile(psdPath)
+	if err != nil {
+		return nil, err
 	}
 
-	var privateKey *ecdsa.PrivateKey
-	for _, account := range accounts.PrivateKeys {
-		privateKey, err = crypto.HexToECDSA(account)
-		if err != nil {
-			return nil, fmt.Errorf("recover private key fail: %w", err)
-		}
-		break
+	unlockedKey, err := keystore.DecryptKey(keyByte, strings.TrimSpace(string(password)))
+	if err != nil {
+		return nil, err
 	}
 
 	// deploy a contract first
-	auth := bind.NewKeyedTransactor(privateKey)
+	auth := bind.NewKeyedTransactor(unlockedKey.PrivateKey)
 	broker, err := NewBroker(common.HexToAddress(cfg.Ether.ContractAddress), etherCli)
 	if err != nil {
 		return nil, fmt.Errorf("failed to instantiate a Broker contract: %w", err)
@@ -200,10 +191,8 @@ func (c *Client) SubmitIBTP(ibtp *pb.IBTP) (*model.PluginResponse, error) {
 		result [][]byte
 		status bool
 	)
-	receipt, err := c.ethClient.TransactionReceipt(c.ctx, tx.Hash())
-	if err != nil {
-		return ret, err
-	}
+
+	receipt := c.waitForMined(tx.Hash())
 
 	for _, lg := range receipt.Logs {
 		switch eventSigs[lg.Topics[0].Hex()] {
@@ -240,15 +229,12 @@ func (c *Client) SubmitIBTP(ibtp *pb.IBTP) (*model.PluginResponse, error) {
 		newArgs = append(newArgs, content.Args[0])
 		newArgs = append(newArgs, result...)
 	case "interchainCharge":
-		newArgs = append(newArgs, []byte(strconv.FormatBool(status)))
-		logger.Info("content args are:", string(bytes.Join(content.Args, []byte(","))))
-		logger.Info("partial args are:", string(bytes.Join(content.Args[1:], []byte(","))))
-		newArgs = append(newArgs, content.Args...)
+		newArgs = append(newArgs, []byte(strconv.FormatBool(status)), content.Args[0])
+		newArgs = append(newArgs, content.Args[2:]...)
 	default:
 		newArgs = append(newArgs, result...)
 	}
 
-	logger.Info("generate callback: %v", receipt)
 	ret.Result, err = c.generateCallback(ibtp, newArgs)
 	if err != nil {
 		return nil, err
@@ -368,6 +354,25 @@ func (c *Client) GetCallbackMeta() (map[string]uint64, error) {
 
 func (c *Client) CommitCallback(ibtp *pb.IBTP) error {
 	return nil
+}
+
+func (c *Client) waitForMined(hash common.Hash) *types.Receipt {
+	var (
+		receipt *types.Receipt
+		err     error
+	)
+	if err := retry.Retry(func(attempt uint) error {
+		receipt, err = c.ethClient.TransactionReceipt(c.ctx, hash)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	}, strategy.Wait(2*time.Second)); err != nil {
+		logger.Panicf("Can't get receipt for tx %s: %s", hash.Hex(), err.Error())
+	}
+
+	return receipt
 }
 
 func main() {

@@ -21,6 +21,7 @@ type Ether struct {
 	ContractAddress string `mapstructure:"contract_address" json:"contract_address"`
 	AbiPath         string `mapstructure:"abi_path" json:"abi_path"`
 	KeyPath         string `mapstructure:"key_path" json:"key_path"`
+	Password        string `toml:"password" json:"password"`
 }
 
 func defaultConfig() *Config {
@@ -31,6 +32,7 @@ func defaultConfig() *Config {
 			ContractAddress: "0x1049a0bc31bb746b56b2c10d81644ab7579eb45b",
 			AbiPath:         "broker.abi",
 			KeyPath:         "~/.pier/ether/key.json",
+			Password:        "123",
 		},
 	}
 }
