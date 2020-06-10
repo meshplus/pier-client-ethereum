@@ -12,6 +12,12 @@ eth:
 	mkdir -p build
 	$(GO) build --buildmode=plugin -o build/eth-client.so ./*.go
 
+docker:
+	mkdir -p build
+	cd build && rm -rf pier && git clone https://github.com/meshplus/pier.git && cd pier && git checkout v1.0.0-rc4
+	cd ${CURRENT_PATH}
+	docker build -t pier-ethereum .
+
 ## make linter: Run golanci-lint
 linter:
 	golangci-lint run -E goimports --skip-dirs-use-default -D staticcheck
