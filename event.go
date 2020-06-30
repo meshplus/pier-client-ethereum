@@ -15,7 +15,7 @@ func Convert2IBTP(ev *BrokerThrowEvent, from string, ibtpType pb.IBTP_Type) *pb.
 	}
 	return &pb.IBTP{
 		From:      from,
-		To:        ev.To.String(),
+		To:        strings.ToLower(ev.To.String()),
 		Index:     ev.Index,
 		Type:      ibtpType,
 		Timestamp: time.Now().UnixNano(),
