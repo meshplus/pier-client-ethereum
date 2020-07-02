@@ -29,10 +29,10 @@ func defaultConfig() *Config {
 		Ether: Ether{
 			Addr:            "https://mainnet.infura.io",
 			Name:            "Ethereum",
-			ContractAddress: "0x1049a0bc31bb746b56b2c10d81644ab7579eb45b",
+			ContractAddress: "0xD3880ea40670eD51C3e3C0ea089fDbDc9e3FBBb4",
 			AbiPath:         "broker.abi",
-			KeyPath:         "~/.pier/ether/key.json",
-			Password:        "123",
+			KeyPath:         "account.key",
+			Password:        "",
 		},
 	}
 }

@@ -59,6 +59,11 @@ func NewClient(configPath string, pierID string, extra []byte) (client.Client, e
 		return nil, fmt.Errorf("unmarshal config for plugin :%w", err)
 	}
 
+	logger.WithFields(logrus.Fields{
+		"broker address":   cfg.Ether.ContractAddress,
+		"ethereum node ip": cfg.Ether.Addr,
+	}).Info("Basic appchain info")
+
 	logging.SetLevel(logging.CRITICAL, "")
 
 	etherCli, err := ethclient.Dial(cfg.Ether.Addr)

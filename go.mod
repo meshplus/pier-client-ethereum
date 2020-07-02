@@ -8,7 +8,7 @@ require (
 	github.com/ethereum/go-ethereum v1.9.13
 	github.com/meshplus/bitxhub-kit v1.0.1-0.20200525112026-df2160653e23
 	github.com/meshplus/bitxhub-model v1.0.0-rc4.0.20200608065824-2fbc63639e92
-	github.com/meshplus/pier v1.0.0-rc2
+	github.com/meshplus/pier v1.0.0-rc4
 	github.com/op/go-logging v0.0.0-20160315200505-970db520ece7
 	github.com/pkg/errors v0.9.1
 	github.com/sirupsen/logrus v1.5.0
@@ -21,7 +21,11 @@ replace golang.org/x/text => golang.org/x/text v0.3.0
 
 replace golang.org/x/net => golang.org/x/net v0.0.0-20200202094626-16171245cfb2
 
+replace golang.org/x/crypto => golang.org/x/crypto v0.0.0-20200311171314-f7b00557c8c4
+
 replace github.com/golang/protobuf => github.com/golang/protobuf v1.3.2
+
+replace github.com/sirupsen/logrus => github.com/sirupsen/logrus v1.5.0
 
 replace github.com/meshplus/pier => ../pier
 
