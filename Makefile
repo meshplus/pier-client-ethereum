@@ -15,7 +15,7 @@ help: Makefile
 ## make eth: build ethereum client plugin
 eth:
 	mkdir -p build
-	$(GO) build --buildmode=plugin -o build/eth-client.so ./*.go
+	$(GO) build -o build/eth-client ./*.go
 
 docker:
 	mkdir -p build

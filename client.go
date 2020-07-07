@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"math/big"
 	"path/filepath"
+	"plugin"
 	"strconv"
 	"strings"
 	"time"
@@ -20,10 +21,10 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/hashicorp/go-plugin"
 	"github.com/meshplus/bitxhub-kit/log"
 	"github.com/meshplus/bitxhub-model/pb"
 	"github.com/meshplus/pier-client-ethereum/solidity"
-	"github.com/meshplus/pier/pkg/model"
 	"github.com/meshplus/pier/pkg/plugins/client"
 	"github.com/op/go-logging"
 	"github.com/sirupsen/logrus"
@@ -53,10 +54,10 @@ var (
 	EtherType               = "ethereum"
 )
 
-func NewClient(configPath string, pierID string, extra []byte) (client.Client, error) {
+func (c *Client) Initialize(configPath string, pierID string, extra []byte) error {
 	cfg, err := UnmarshalConfig(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("unmarshal config for plugin :%w", err)
+		return fmt.Errorf("unmarshal config for plugin :%w", err)
 	}
 
 	logger.WithFields(logrus.Fields{
@@ -68,31 +69,31 @@ func NewClient(configPath string, pierID string, extra []byte) (client.Client, e
 
 	etherCli, err := ethclient.Dial(cfg.Ether.Addr)
 	if err != nil {
-		return nil, fmt.Errorf("dial ethereum node: %w", err)
+		return fmt.Errorf("dial ethereum node: %w", err)
 	}
 
 	keyPath := filepath.Join(configPath, cfg.Ether.KeyPath)
 	keyByte, err := ioutil.ReadFile(keyPath)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	psdPath := filepath.Join(configPath, cfg.Ether.Password)
 	password, err := ioutil.ReadFile(psdPath)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	unlockedKey, err := keystore.DecryptKey(keyByte, strings.TrimSpace(string(password)))
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// deploy a contract first
 	auth := bind.NewKeyedTransactor(unlockedKey.PrivateKey)
 	broker, err := NewBroker(common.HexToAddress(cfg.Ether.ContractAddress), etherCli)
 	if err != nil {
-		return nil, fmt.Errorf("failed to instantiate a Broker contract: %w", err)
+		return fmt.Errorf("failed to instantiate a Broker contract: %w", err)
 	}
 	session := &BrokerSession{
 		Contract: broker,
@@ -105,25 +106,24 @@ func NewClient(configPath string, pierID string, extra []byte) (client.Client, e
 	b, err := ioutil.ReadFile(filepath.Join(configPath, cfg.Ether.AbiPath))
 	ab, err := abi.JSON(bytes.NewReader(b))
 	if err != nil {
-		return nil, fmt.Errorf("abi unmarshal: %s", err.Error())
+		return fmt.Errorf("abi unmarshal: %s", err.Error())
 	}
 
 	conn, err := rpc.Dial(cfg.Ether.Addr)
 	if err != nil {
-		return nil, fmt.Errorf("rpc dial: %s", err.Error())
+		return fmt.Errorf("rpc dial: %s", err.Error())
 	}
 
-	return &Client{
-		config:    cfg,
-		eventC:    make(chan *pb.IBTP, 1024),
-		ethClient: etherCli,
-		broker:    broker,
-		session:   session,
-		abi:       ab,
-		conn:      conn,
-		pierID:    pierID,
-		ctx:       context.Background(),
-	}, nil
+	c.config = cfg
+	c.eventC = make(chan *pb.IBTP, 1024)
+	c.ethClient = etherCli
+	c.broker = broker
+	c.session = session
+	c.abi = ab
+	c.conn = conn
+	c.pierID = pierID
+	c.ctx = context.Background()
+	return nil
 }
 
 func (c *Client) Start() error {
@@ -149,8 +149,8 @@ func (c *Client) GetIBTP() chan *pb.IBTP {
 // SubmitIBTP submit interchain ibtp. It will unwrap the ibtp and execute
 // the function inside the ibtp. If any execution results returned, pass
 // them to other modules.
-func (c *Client) SubmitIBTP(ibtp *pb.IBTP) (*model.PluginResponse, error) {
-	ret := &model.PluginResponse{}
+func (c *Client) SubmitIBTP(ibtp *pb.IBTP) (*pb.SubmitIBTPResponse, error) {
+	ret := &pb.SubmitIBTPResponse{}
 	pd := &pb.Payload{}
 	if err := pd.Unmarshal(ibtp.Payload); err != nil {
 		return nil, fmt.Errorf("ibtp payload unmarshal: %w", err)
@@ -383,5 +383,13 @@ func (c *Client) waitForMined(hash common.Hash) *types.Receipt {
 }
 
 func main() {
+	plugin.Serve(&plugin.ServeConfig{
+		HandshakeConfig: client.Handshake,
+		Plugins: map[string]plugin.Plugin{
+			"ethereum-plugin": &client.AppchainGRPCPlugin{Impl: &Client{}},
+		},
 
+		// A non-nil value here enables gRPC serving for this plugin...
+		GRPCServer: plugin.DefaultGRPCServer,
+	})
 }
