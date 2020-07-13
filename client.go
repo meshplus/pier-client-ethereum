@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math/big"
+	"os"
 	"path/filepath"
 	"plugin"
 	"strconv"
@@ -21,13 +22,12 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/go-plugin"
-	"github.com/meshplus/bitxhub-kit/log"
 	"github.com/meshplus/bitxhub-model/pb"
 	"github.com/meshplus/pier-client-ethereum/solidity"
-	"github.com/meshplus/pier/pkg/plugins/client"
+	"github.com/meshplus/pier/pkg/plugins"
 	"github.com/op/go-logging"
-	"github.com/sirupsen/logrus"
 )
 
 //go:generate abigen --sol ./example/broker.sol --pkg main --out broker.go
@@ -49,9 +49,13 @@ var (
 		"0x23de11857b4338b8e6ccaec81162b447b44040ff3cfdd1174d548975eb5c1c3e": "logInterchainStatus",
 		"0xad89cfa05a757be8d2179bb6609bf9034971b2427bd49d48e79552d3e8493e99": "interchainEvent",
 	}
-	_         client.Client = (*Client)(nil)
-	logger                  = log.NewWithModule("client")
-	EtherType               = "ethereum"
+	_      plugins.Client = (*Client)(nil)
+	logger                = hclog.New(&hclog.LoggerOptions{
+		Name:   "client",
+		Output: os.Stdout,
+		Level:  hclog.Info,
+	})
+	EtherType = "ethereum"
 )
 
 func (c *Client) Initialize(configPath string, pierID string, extra []byte) error {
@@ -60,10 +64,9 @@ func (c *Client) Initialize(configPath string, pierID string, extra []byte) erro
 		return fmt.Errorf("unmarshal config for plugin :%w", err)
 	}
 
-	logger.WithFields(logrus.Fields{
-		"broker address":   cfg.Ether.ContractAddress,
-		"ethereum node ip": cfg.Ether.Addr,
-	}).Info("Basic appchain info")
+	logger.Info("Basic appchain info",
+		"broker address", cfg.Ether.ContractAddress,
+		"ethereum node ip", cfg.Ether.Addr)
 
 	logging.SetLevel(logging.CRITICAL, "")
 
@@ -179,16 +182,17 @@ func (c *Client) SubmitIBTP(ibtp *pb.IBTP) (*pb.SubmitIBTPResponse, error) {
 	if err := retry.Retry(func(attempt uint) error {
 		tx, err = c.broker.BrokerTransactor.contract.Transact(&c.session.TransactOpts, content.Func, resultArgs...)
 		if err != nil {
-			logger.WithFields(logrus.Fields{
-				"func": content.Func,
-				"args": string(bytes.Join(content.Args, []byte(","))),
-			}).Errorf("invoke contract failed: %s, retry.", err.Error())
+			logger.Info("Invoke contract failed",
+				"func", content.Func,
+				"args", string(bytes.Join(content.Args, []byte(","))),
+				"error", err,
+			)
 			return err
 		}
 
 		return nil
 	}, strategy.Wait(2*time.Second)); err != nil {
-		logger.Panicf("Can't invoke contract: %s", err.Error())
+		logger.Error("Can't invoke contract", "error", err)
 	}
 
 	// get transaction result from subscription
@@ -276,7 +280,7 @@ func (c *Client) toIBTP(blockNum *big.Int, idx uint64) (*pb.IBTP, error) {
 
 		return nil
 	}, strategy.Wait(1*time.Second)); err != nil {
-		logger.Panic(err)
+		logger.Error("Query block by number failed", "error", err)
 	}
 
 	txs := block.Transactions()
@@ -376,7 +380,7 @@ func (c *Client) waitForMined(hash common.Hash) *types.Receipt {
 
 		return nil
 	}, strategy.Wait(2*time.Second)); err != nil {
-		logger.Panicf("Can't get receipt for tx %s: %s", hash.Hex(), err.Error())
+		logger.Error("Can't get receipt for tx", hash.Hex(), "error", err)
 	}
 
 	return receipt
@@ -384,12 +388,14 @@ func (c *Client) waitForMined(hash common.Hash) *types.Receipt {
 
 func main() {
 	plugin.Serve(&plugin.ServeConfig{
-		HandshakeConfig: client.Handshake,
+		HandshakeConfig: plugins.Handshake,
 		Plugins: map[string]plugin.Plugin{
-			"ethereum-plugin": &client.AppchainGRPCPlugin{Impl: &Client{}},
+			plugins.PluginName: &plugins.AppchainGRPCPlugin{Impl: &Client{}},
 		},
-
+		Logger: logger,
 		// A non-nil value here enables gRPC serving for this plugin...
 		GRPCServer: plugin.DefaultGRPCServer,
 	})
+
+	logger.Info("Plugin server down")
 }
