@@ -227,6 +227,7 @@ func (c *Client) SubmitIBTP(ibtp *pb.IBTP) (*model.PluginResponse, error) {
 		return ret, nil
 	}
 
+	responseStatus := true
 	// execution invoke no err
 	var newArgs = make([][]byte, 0)
 	switch content.Func {
@@ -236,11 +237,12 @@ func (c *Client) SubmitIBTP(ibtp *pb.IBTP) (*model.PluginResponse, error) {
 	case "interchainCharge":
 		newArgs = append(newArgs, []byte(strconv.FormatBool(status)), content.Args[0])
 		newArgs = append(newArgs, content.Args[2:]...)
+		responseStatus = status
 	default:
 		newArgs = append(newArgs, result...)
 	}
 
-	ret.Result, err = c.generateCallback(ibtp, newArgs)
+	ret.Result, err = c.generateCallback(ibtp, newArgs, responseStatus)
 	if err != nil {
 		return nil, err
 	}
