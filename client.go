@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math/big"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -20,13 +21,12 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
-	"github.com/meshplus/bitxhub-kit/log"
+	"github.com/hashicorp/go-hclog"
+	"github.com/hashicorp/go-plugin"
 	"github.com/meshplus/bitxhub-model/pb"
 	"github.com/meshplus/pier-client-ethereum/solidity"
-	"github.com/meshplus/pier/pkg/model"
-	"github.com/meshplus/pier/pkg/plugins/client"
+	"github.com/meshplus/pier/pkg/plugins"
 	"github.com/op/go-logging"
-	"github.com/sirupsen/logrus"
 )
 
 //go:generate abigen --sol ./example/broker.sol --pkg main --out broker.go
@@ -48,51 +48,54 @@ var (
 		"0x23de11857b4338b8e6ccaec81162b447b44040ff3cfdd1174d548975eb5c1c3e": "logInterchainStatus",
 		"0xad89cfa05a757be8d2179bb6609bf9034971b2427bd49d48e79552d3e8493e99": "interchainEvent",
 	}
-	_         client.Client = (*Client)(nil)
-	logger                  = log.NewWithModule("client")
-	EtherType               = "ethereum"
+	_      plugins.Client = (*Client)(nil)
+	logger                = hclog.New(&hclog.LoggerOptions{
+		Name:   "client",
+		Output: os.Stdout,
+		Level:  hclog.Info,
+	})
+	EtherType = "ethereum"
 )
 
-func NewClient(configPath string, pierID string, extra []byte) (client.Client, error) {
+func (c *Client) Initialize(configPath string, pierID string, extra []byte) error {
 	cfg, err := UnmarshalConfig(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("unmarshal config for plugin :%w", err)
+		return fmt.Errorf("unmarshal config for plugin :%w", err)
 	}
 
-	logger.WithFields(logrus.Fields{
-		"broker address":   cfg.Ether.ContractAddress,
-		"ethereum node ip": cfg.Ether.Addr,
-	}).Info("Basic appchain info")
+	logger.Info("Basic appchain info",
+		"broker address", cfg.Ether.ContractAddress,
+		"ethereum node ip", cfg.Ether.Addr)
 
 	logging.SetLevel(logging.CRITICAL, "")
 
 	etherCli, err := ethclient.Dial(cfg.Ether.Addr)
 	if err != nil {
-		return nil, fmt.Errorf("dial ethereum node: %w", err)
+		return fmt.Errorf("dial ethereum node: %w", err)
 	}
 
 	keyPath := filepath.Join(configPath, cfg.Ether.KeyPath)
 	keyByte, err := ioutil.ReadFile(keyPath)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	psdPath := filepath.Join(configPath, cfg.Ether.Password)
 	password, err := ioutil.ReadFile(psdPath)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	unlockedKey, err := keystore.DecryptKey(keyByte, strings.TrimSpace(string(password)))
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// deploy a contract first
 	auth := bind.NewKeyedTransactor(unlockedKey.PrivateKey)
 	broker, err := NewBroker(common.HexToAddress(cfg.Ether.ContractAddress), etherCli)
 	if err != nil {
-		return nil, fmt.Errorf("failed to instantiate a Broker contract: %w", err)
+		return fmt.Errorf("failed to instantiate a Broker contract: %w", err)
 	}
 	session := &BrokerSession{
 		Contract: broker,
@@ -105,25 +108,24 @@ func NewClient(configPath string, pierID string, extra []byte) (client.Client, e
 	b, err := ioutil.ReadFile(filepath.Join(configPath, cfg.Ether.AbiPath))
 	ab, err := abi.JSON(bytes.NewReader(b))
 	if err != nil {
-		return nil, fmt.Errorf("abi unmarshal: %s", err.Error())
+		return fmt.Errorf("abi unmarshal: %s", err.Error())
 	}
 
 	conn, err := rpc.Dial(cfg.Ether.Addr)
 	if err != nil {
-		return nil, fmt.Errorf("rpc dial: %s", err.Error())
+		return fmt.Errorf("rpc dial: %s", err.Error())
 	}
 
-	return &Client{
-		config:    cfg,
-		eventC:    make(chan *pb.IBTP, 1024),
-		ethClient: etherCli,
-		broker:    broker,
-		session:   session,
-		abi:       ab,
-		conn:      conn,
-		pierID:    pierID,
-		ctx:       context.Background(),
-	}, nil
+	c.config = cfg
+	c.eventC = make(chan *pb.IBTP, 1024)
+	c.ethClient = etherCli
+	c.broker = broker
+	c.session = session
+	c.abi = ab
+	c.conn = conn
+	c.pierID = pierID
+	c.ctx = context.Background()
+	return nil
 }
 
 func (c *Client) Start() error {
@@ -149,8 +151,8 @@ func (c *Client) GetIBTP() chan *pb.IBTP {
 // SubmitIBTP submit interchain ibtp. It will unwrap the ibtp and execute
 // the function inside the ibtp. If any execution results returned, pass
 // them to other modules.
-func (c *Client) SubmitIBTP(ibtp *pb.IBTP) (*model.PluginResponse, error) {
-	ret := &model.PluginResponse{}
+func (c *Client) SubmitIBTP(ibtp *pb.IBTP) (*pb.SubmitIBTPResponse, error) {
+	ret := &pb.SubmitIBTPResponse{}
 	pd := &pb.Payload{}
 	if err := pd.Unmarshal(ibtp.Payload); err != nil {
 		return nil, fmt.Errorf("ibtp payload unmarshal: %w", err)
@@ -179,16 +181,17 @@ func (c *Client) SubmitIBTP(ibtp *pb.IBTP) (*model.PluginResponse, error) {
 	if err := retry.Retry(func(attempt uint) error {
 		tx, err = c.broker.BrokerTransactor.contract.Transact(&c.session.TransactOpts, content.Func, resultArgs...)
 		if err != nil {
-			logger.WithFields(logrus.Fields{
-				"func": content.Func,
-				"args": string(bytes.Join(content.Args, []byte(","))),
-			}).Errorf("invoke contract failed: %s, retry.", err.Error())
+			logger.Info("Invoke contract failed",
+				"func", content.Func,
+				"args", string(bytes.Join(content.Args, []byte(","))),
+				"error", err,
+			)
 			return err
 		}
 
 		return nil
 	}, strategy.Wait(2*time.Second)); err != nil {
-		logger.Panicf("Can't invoke contract: %s", err.Error())
+		logger.Error("Can't invoke contract", "error", err)
 	}
 
 	// get transaction result from subscription
@@ -276,7 +279,7 @@ func (c *Client) toIBTP(blockNum *big.Int, idx uint64) (*pb.IBTP, error) {
 
 		return nil
 	}, strategy.Wait(1*time.Second)); err != nil {
-		logger.Panic(err)
+		logger.Error("Query block by number failed", "error", err)
 	}
 
 	txs := block.Transactions()
@@ -376,12 +379,22 @@ func (c *Client) waitForMined(hash common.Hash) *types.Receipt {
 
 		return nil
 	}, strategy.Wait(2*time.Second)); err != nil {
-		logger.Panicf("Can't get receipt for tx %s: %s", hash.Hex(), err.Error())
+		logger.Error("Can't get receipt for tx", hash.Hex(), "error", err)
 	}
 
 	return receipt
 }
 
 func main() {
+	plugin.Serve(&plugin.ServeConfig{
+		HandshakeConfig: plugins.Handshake,
+		Plugins: map[string]plugin.Plugin{
+			plugins.PluginName: &plugins.AppchainGRPCPlugin{Impl: &Client{}},
+		},
+		Logger: logger,
+		// A non-nil value here enables gRPC serving for this plugin...
+		GRPCServer: plugin.DefaultGRPCServer,
+	})
 
+	logger.Info("Plugin server down")
 }
