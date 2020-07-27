@@ -6,7 +6,7 @@ require (
 	github.com/Rican7/retry v0.1.0
 	github.com/cloudflare/cfssl v1.4.1
 	github.com/ethereum/go-ethereum v1.9.13
-	github.com/meshplus/bitxhub-kit v1.0.1-0.20200525112026-df2160653e23
+	github.com/meshplus/bitxhub-kit v1.0.1-0.20200727075316-ea098a3c3411
 	github.com/meshplus/bitxhub-model v1.0.0-rc4.0.20200608065824-2fbc63639e92
 	github.com/meshplus/pier v1.0.0-rc4
 	github.com/op/go-logging v0.0.0-20160315200505-970db520ece7
