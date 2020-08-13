@@ -41,8 +41,12 @@ func (c *Client) generateCallback(original *pb.IBTP, args [][]byte, status bool)
 	}
 
 	typ := pb.IBTP_RECEIPT_SUCCESS
-	if !status {
-		typ = pb.IBTP_RECEIPT_FAILURE
+	if original.Type == pb.IBTP_INTERCHAIN {
+		if !status {
+			typ = pb.IBTP_RECEIPT_FAILURE
+		}
+	} else {
+		typ = pb.IBTP_ASSET_EXCHANGE_RECEIPT
 	}
 
 	return &pb.IBTP{

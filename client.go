@@ -26,7 +26,6 @@ import (
 	"github.com/meshplus/bitxhub-model/pb"
 	"github.com/meshplus/pier-client-ethereum/solidity"
 	"github.com/meshplus/pier/pkg/plugins"
-	"github.com/op/go-logging"
 )
 
 //go:generate abigen --sol ./example/broker.sol --pkg main --out broker.go
@@ -51,8 +50,8 @@ var (
 	_      plugins.Client = (*Client)(nil)
 	logger                = hclog.New(&hclog.LoggerOptions{
 		Name:   "client",
-		Output: os.Stdout,
-		Level:  hclog.Info,
+		Output: os.Stderr,
+		Level:  hclog.Trace,
 	})
 	EtherType = "ethereum"
 )
@@ -66,8 +65,6 @@ func (c *Client) Initialize(configPath string, pierID string, extra []byte) erro
 	logger.Info("Basic appchain info",
 		"broker address", cfg.Ether.ContractAddress,
 		"ethereum node ip", cfg.Ether.Addr)
-
-	logging.SetLevel(logging.CRITICAL, "")
 
 	etherCli, err := ethclient.Dial(cfg.Ether.Addr)
 	if err != nil {
@@ -170,6 +167,9 @@ func (c *Client) SubmitIBTP(ibtp *pb.IBTP) (*pb.SubmitIBTPResponse, error) {
 		[]byte(content.DstContractId),
 	)
 	args = append(args, content.Args...)
+	if pb.IBTP_ASSET_EXCHANGE_REDEEM == ibtp.Type || pb.IBTP_ASSET_EXCHANGE_REFUND == ibtp.Type {
+		args = append(args, ibtp.Extra)
+	}
 	resultArgs, err := solidity.ABIUnmarshal(c.abi, args, content.Func)
 	if err != nil {
 		return ret, fmt.Errorf("unmarshal ibtp function abi args %w", err)
@@ -219,8 +219,8 @@ func (c *Client) SubmitIBTP(ibtp *pb.IBTP) (*pb.SubmitIBTPResponse, error) {
 
 			status = out.Status
 			result = append(result, []byte(strconv.FormatBool(out.Status)))
-		default:
-			return ret, fmt.Errorf("unsupported method")
+			//default:
+			//	return ret, fmt.Errorf("unsupported method")
 		}
 	}
 
@@ -241,6 +241,10 @@ func (c *Client) SubmitIBTP(ibtp *pb.IBTP) (*pb.SubmitIBTPResponse, error) {
 		newArgs = append(newArgs, []byte(strconv.FormatBool(status)), content.Args[0])
 		newArgs = append(newArgs, content.Args[2:]...)
 		responseStatus = status
+	case "interchainAssetExchangeRedeem":
+		newArgs = append(newArgs, args[3:]...)
+	case "interchainAssetExchangeRefund":
+		newArgs = append(newArgs, args[3:]...)
 	default:
 		newArgs = append(newArgs, result...)
 	}
