@@ -417,6 +417,10 @@ github.com/meshplus/bitxhub-model v1.0.0-rc4.0.20200707045101-18b88b80efb1 h1:g9
 github.com/meshplus/bitxhub-model v1.0.0-rc4.0.20200707045101-18b88b80efb1/go.mod h1:QK8aACbxtZEA3Hk1BOCirW0uxMWLsMrLDpWz9FweIKM=
 github.com/meshplus/bitxhub-model v1.0.0-rc4.0.20200714082154-970b730cdb6c h1:RD+QMpgFKfdwy0rdmyaF2EX6Ris6pmz5scmGAuR/CYY=
 github.com/meshplus/bitxhub-model v1.0.0-rc4.0.20200714082154-970b730cdb6c/go.mod h1:QK8aACbxtZEA3Hk1BOCirW0uxMWLsMrLDpWz9FweIKM=
+github.com/meshplus/bitxhub-model v1.0.0-rc4.0.20200729120451-6ff9eb7fe8fc h1:40lbdmb9YKeEEhGHZH7Z6BqsapGVu1H262d7K/UWGV4=
+github.com/meshplus/bitxhub-model v1.0.0-rc4.0.20200729120451-6ff9eb7fe8fc/go.mod h1:QK8aACbxtZEA3Hk1BOCirW0uxMWLsMrLDpWz9FweIKM=
+github.com/meshplus/bitxhub-model v1.0.0-rc4.0.20200731025300-2bb1717059e0 h1:HICOZKS7qw4++eT0EXioutryV0O+v6aPp1jdhjlfJyU=
+github.com/meshplus/bitxhub-model v1.0.0-rc4.0.20200731025300-2bb1717059e0/go.mod h1:QK8aACbxtZEA3Hk1BOCirW0uxMWLsMrLDpWz9FweIKM=
 github.com/meshplus/go-bitxhub-client v1.0.0-rc4.0.20200509065005-851bf8c357e4/go.mod h1:JIfB02707GTRV97lMdw09GStYlK4upf1kn3B4DvwQYA=
 github.com/meshplus/pier v1.0.0-rc1.0.20200717044435-de24cfbef0f3 h1:zpSyEHn69VFqpQXrsuWwnri3tyQRozTIwWV05641YOo=
 github.com/meshplus/pier v1.0.0-rc1.0.20200717044435-de24cfbef0f3/go.mod h1:78k4sa5aeOKXGBOU776vnRHaoZ4BJ8H0vassLC8oPQs=
