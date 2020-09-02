@@ -104,7 +104,15 @@ contract Broker {
             method = "interchainAssetExchangeRefund";
             callback = "interchainAssetExchangeConfirm";
         }
-        return invokeInterchain(destChainID, msg.sender, destAddr, method, args, callback);
+        bool resp = invokeInterchain(destChainID, msg.sender, destAddr, method, args, callback);
+        if (resp == true) {
+            if (outCounter[destChainID] > inCounter[destChainID]){
+                callbackCounter[destChainID] = outCounter[destChainID] - 1;
+            } else {
+                callbackCounter[destChainID] = inCounter[destChainID] - 1;
+            }
+        }
+        return true;
     }
 
     function invokeInterchain(
