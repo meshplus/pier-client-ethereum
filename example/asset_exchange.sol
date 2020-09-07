@@ -19,6 +19,8 @@ contract AssetExchange {
         bool finished;
     }
 
+    mapping(address => bool) addrs;
+    address[] addrList;
     mapping(address => bool) bxhValidators;
     uint32 validatorSize = 0;
     mapping(string => uint64) accountM; // map for accounts
@@ -28,7 +30,7 @@ contract AssetExchange {
     address AdminAddr; // admin address
     // change the address of Broker accordingly
     //    address BrokerAddr = 0x9E0901D698E854F6CFE9e478C38d20A01908768a;
-    address BrokerAddr = 0x6cc508fb45FD7473046B1C0D20FcA14404e79C04;
+    address BrokerAddr = 0xD3880ea40670eD51C3e3C0ea089fDbDc9e3FBBb4;
     Broker broker = Broker(BrokerAddr);
 
     // AccessControl
@@ -254,7 +256,6 @@ contract AssetExchange {
         bytes memory bytesSignatures = bytes(signatures);
         uint32 threshold = (validatorSize - 1) / 3;
         uint32 count = 0;
-        mapping(address => bool) addrs;
 
         // 33 bits pub key + 64 bits signature
         for (uint i = 0; i * (33 + sigLen) < bytesSignatures.length; i++) {
@@ -273,6 +274,7 @@ contract AssetExchange {
             if (bxhValidators[addr]) {
                 addrs[addr] = true;
                 count++;
+                addrList.push(addr);
             } else {
                 addr = ecrecover(sha256Msg, 28, r, s);
                 if (addrs[addr]) {
@@ -281,9 +283,15 @@ contract AssetExchange {
                 if (bxhValidators[addr]) {
                     addrs[addr] = true;
                     count++;
+                    addrList.push(addr);
                 }
             }
         }
+
+        for (uint i = addrList.length - 1; i >= 0; i--) {
+            delete addrs[addrList[i]];
+        }
+        delete addrList;
 
         if (count > threshold) {
             return true;
