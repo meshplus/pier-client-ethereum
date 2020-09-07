@@ -288,8 +288,8 @@ contract AssetExchange {
             }
         }
 
-        for (uint i = addrList.length - 1; i >= 0; i--) {
-            delete addrs[addrList[i]];
+        for (uint i = 0; i < addrList.length; i++) {
+            addrs[addrList[i]] = false;
         }
         delete addrList;
 
