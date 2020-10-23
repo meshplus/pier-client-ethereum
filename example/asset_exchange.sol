@@ -248,7 +248,7 @@ contract AssetExchange {
     }
 
     function verifySignatures(string memory assetExchangeID, string memory status, string memory signatures) internal  returns (bool){
-        uint32 sigLen = 64;
+        uint32 sigLen = 65;
         string memory message = concat(toSlice(assetExchangeID), toSlice("-"));
         message = concat(toSlice(message), toSlice(status));
         bytes memory bytesMsg = bytes(message);
@@ -257,16 +257,15 @@ contract AssetExchange {
         uint32 threshold = (validatorSize - 1) / 3;
         uint32 count = 0;
 
-        // 33 bits pub key + 64 bits signature
-        for (uint i = 0; i * (33 + sigLen) < bytesSignatures.length; i++) {
+        for (uint i = 0; i * sigLen < bytesSignatures.length; i++) {
             bytes memory bytesSign = new bytes(sigLen);
             for (uint j = 0; j < sigLen; j++) {
-                bytesSign[j] = bytesSignatures[i * (33 + sigLen) + 33 + j];
+                bytesSign[j] = bytesSignatures[i * sigLen + j];
             }
 
-            (bytes32 r, bytes32 s) = splitSignature(bytesSign);
+            (uint8 v, bytes32 r, bytes32 s) = splitSignature(bytesSign);
 
-            address addr = ecrecover(sha256Msg, 27, r, s);
+            address addr = ecrecover(sha256Msg, v, r, s);
             if (addrs[addr]) {
                 continue;
             }
@@ -275,16 +274,6 @@ contract AssetExchange {
                 addrs[addr] = true;
                 count++;
                 addrList.push(addr);
-            } else {
-                addr = ecrecover(sha256Msg, 28, r, s);
-                if (addrs[addr]) {
-                    continue;
-                }
-                if (bxhValidators[addr]) {
-                    addrs[addr] = true;
-                    count++;
-                    addrList.push(addr);
-                }
             }
         }
 
@@ -301,16 +290,18 @@ contract AssetExchange {
     }
 
     function splitSignature(bytes memory sig) internal pure returns (bytes32 r, bytes32 s) {
-        require(sig.length == 64);
+        require(sig.length == 65);
 
         assembly {
-        // first 32 bytes, after the length prefix
+            // first 32 bytes, after the length prefix
             r := mload(add(sig, 32))
-        // second 32 bytes
+            // second 32 bytes
             s := mload(add(sig, 64))
+            // final byte (first byte of the next 32 bytes)
+            v := byte(0, mload(add(sig, 96)))
         }
 
-        return (r, s);
+        return (v, r, s);
     }
 
     function toString(address _addr) public pure returns (string memory) {
