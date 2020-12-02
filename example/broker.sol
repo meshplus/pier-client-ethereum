@@ -5,6 +5,9 @@ contract Broker {
     mapping(address => int64) whiteList;
     address[] contracts;
     address[] admins;
+    // only account in the accountWhiteList can transfer to another chain
+    string[] accountList = ["Alice", "Bob"];
+    mapping(string => bool) accountWhiteList;
 
     event throwEvent(uint64 index, address to, address fid, string tid, string func, string args, string callback);
     event LogInterchainData(bool status, string data);
@@ -34,6 +37,12 @@ contract Broker {
         }
         if (flag) {revert();}
         _;
+    }
+
+    constructor() public {
+        for (uint i = 0; i < accountList.length; i++) {
+            accountWhiteList[accountList[i]] = true;
+        }
     }
 
     function initialize() public {
@@ -69,13 +78,30 @@ contract Broker {
         return true;
     }
 
+    function addAccount(string memory account) public onlyAdmin {
+        accountWhiteList[account] = true;
+    }
+
+    function removeAccount(string memory account) public onlyAdmin {
+        accountWhiteList[account] = false;
+    }
+
     function InterchainTransferInvoke(
         address destChainID,
         string memory destAddr,
         string memory args)
-    public onlyWhiteList returns (bool) {
-        // 发起跨链请求
-        return invokeInterchain(destChainID, msg.sender, destAddr, "interchainCharge", args, "interchainConfirm");
+    public onlyWhiteList returns(bool, string memory) {
+        // Initiate a interchain request.
+        string[] memory splitArgs = split(args, ",");
+        if (splitArgs.length == 0) {
+            return (false, "args for invoking transfer is empty");
+        }
+        // check if sender account is in whiteList
+        if (!accountWhiteList[splitArgs[0]]) {
+            return (false, "sender account is not allowed to invoke interchain transfer");
+        }
+        bool status = invokeInterchain(destChainID, msg.sender, destAddr, "interchainCharge", args, "interchainConfirm");
+        return (status, "");
     }
 
     function InterchainDataSwapInvoke(
