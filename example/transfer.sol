@@ -24,8 +24,10 @@ contract Transfer {
         args = concat(toSlice(args), toSlice(","));
         args = concat(toSlice(args), toSlice(amount));
 
-        bool ok = broker.InterchainTransferInvoke(destChainID, destAddr, args);
-        require(ok);
+        bool ok;
+        string memory msg;
+        (ok, msg) = broker.InterchainTransferInvoke(destChainID, destAddr, args);
+        require(ok, msg);
     }
 
     function interchainRollback(string memory sender, uint64 val) public onlyBroker returns(bool){
@@ -99,5 +101,5 @@ contract Transfer {
 }
 
 contract Broker {
-    function InterchainTransferInvoke(address destChainID, string memory destAddr, string memory args) public returns (bool);
+    function InterchainTransferInvoke(address destChainID, string memory destAddr, string memory args) public returns(bool, string memory);
 }
