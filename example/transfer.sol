@@ -4,7 +4,7 @@ contract Transfer {
     mapping(string => uint64) accountM; // map for accounts
     // change the address of Broker accordingly
     // address BrokerAddr = 0x9E0901D698E854F6CFE9e478C38d20A01908768a;
-    address BrokerAddr = 0xD3880ea40670eD51C3e3C0ea089fDbDc9e3FBBb4;
+    address BrokerAddr = 0x857133c5C69e6Ce66F7AD46F200B9B3573e77582;
     Broker broker = Broker(BrokerAddr);
 
     // AccessControl
@@ -23,11 +23,13 @@ contract Transfer {
         args = concat(toSlice(args), toSlice(receiver));
         args = concat(toSlice(args), toSlice(","));
         args = concat(toSlice(args), toSlice(amount));
+        args = concat(toSlice(args), toSlice(","));
+        args = concat(toSlice(args), toSlice("false"));
 
         bool ok;
-        string memory msg;
-        (ok, msg) = broker.InterchainTransferInvoke(destChainID, destAddr, args);
-        require(ok, msg);
+        string memory info;
+        (ok, info) = broker.InterchainTransferInvoke(destChainID, destAddr, args);
+        require(ok, info);
     }
 
     function interchainRollback(string memory sender, uint64 val) public onlyBroker returns(bool){
@@ -35,8 +37,12 @@ contract Transfer {
         return true;
     }
 
-    function interchainCharge(string memory sender, string memory receiver, uint64 val) public onlyBroker returns(bool) {
-        accountM[receiver] += val;
+    function interchainCharge(string memory sender, string memory receiver, uint64 val, bool isRollback) public onlyBroker returns(bool) {
+        if (!isRollback) {
+            accountM[receiver] += val;
+        } else {
+            accountM[receiver] -= val;
+        }
         return true;
     }
 

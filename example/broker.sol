@@ -22,6 +22,8 @@ contract Broker {
     mapping(address => uint64) inCounter;
     mapping(address => mapping(uint64 => uint)) inMessages;
     mapping(address => uint64) callbackCounter;
+    mapping(address => uint64) srcRollbackCounter;
+    mapping(address => uint64) dstRollbackCounter;
 
     // 权限控制，业务合约需要进行注册
     modifier onlyWhiteList {
@@ -54,6 +56,12 @@ contract Broker {
         }
         for (uint i = 0; i < callbackChains.length; i++) {
             callbackCounter[callbackChains[i]] = 0;
+        }
+        for (uint i = 0; i < inChains.length; i++) {
+            dstRollbackCounter[inChains[i]] = 0;
+        }
+        for (uint i = 0; i < outChains.length; i++) {
+            srcRollbackCounter[outChains[i]] = 0;
         }
         for (uint i = 0; i < contracts.length; i++) {
             whiteList[contracts[i]] = 0;
@@ -185,11 +193,20 @@ contract Broker {
         return true;
     }
 
-    function interchainCharge(address sourceChainID, uint64 index, address destAddr, string memory sender, string memory receiver, uint64 amount) public returns (bool) {
-        // 检查序号是否正确，防止replay attack
-        if (inCounter[sourceChainID] + 1 != index) {
-            emit LogInterchainStatus(false);
-            return false;
+    function interchainCharge(address sourceChainID, uint64 index, address destAddr,
+        string memory sender, string memory receiver, uint64 amount, bool isRollback) public returns (bool) {
+        if (!isRollback) {
+            // 检查序号是否正确，防止replay attack
+            if (inCounter[sourceChainID] + 1 != index) {
+                emit LogInterchainStatus(false);
+                return false;
+            }
+        } else {
+            if (dstRollbackCounter[sourceChainID] >= index) {
+                emit LogInterchainStatus(false);
+                return false;
+            }
+            dstRollbackCounter[sourceChainID] = index;
         }
 
         markInCounter(sourceChainID);
@@ -199,28 +216,27 @@ contract Broker {
         }
 
         Transfer exchanger = Transfer(destAddr);
-        bool status = exchanger.interchainCharge(sender, receiver, amount);
+        bool status = exchanger.interchainCharge(sender, receiver, amount, isRollback);
         emit LogInterchainStatus(status);
         return status;
     }
 
     function interchainConfirm(address sourceChainID, uint64 index, address destAddr, bool status, string memory sender, uint64 amount) public returns (bool) {
-        if (callbackCounter[sourceChainID] + 1 != index) {
-            emit LogInterchainStatus(false);
-            return false;
-        }
-
-        markCallbackCounter(sourceChainID, index);
-        if (whiteList[destAddr] != 1) {
-            emit LogInterchainStatus(false);
-            return false;
-        }
-        // if status is ok, no need to rollback
         if (status) {
+            if (callbackCounter[sourceChainID] + 1 != index && srcRollbackCounter[sourceChainID]+1 != index) {
+                emit LogInterchainStatus(false);
+                return false;
+            }
+            markCallbackCounter(sourceChainID, index);
+            if (whiteList[destAddr] != 1) {
+                emit LogInterchainStatus(false);
+                return false;
+            }
             emit LogInterchainStatus(true);
             return true;
         }
 
+        srcRollbackCounter[sourceChainID] = index;
         Transfer exchanger = Transfer(destAddr);
         bool ret = exchanger.interchainRollback(sender, amount);
         emit LogInterchainStatus(ret);
@@ -394,6 +410,24 @@ contract Broker {
         return (callbackChains, indices);
     }
 
+    function getSrcRollbackMeta() public view returns(address[] memory, uint64[] memory) {
+        uint64[] memory indices = new uint64[](outChains.length);
+        for (uint i = 0; i < outChains.length; i++) {
+            indices[i] = srcRollbackCounter[outChains[i]];
+        }
+
+        return (outChains, indices);
+    }
+
+    function getDstRollbackMeta() public view returns(address[] memory, uint64[] memory) {
+        uint64[] memory indices = new uint64[](inChains.length);
+        for (uint i = 0; i < inChains.length; i++) {
+            indices[i] = dstRollbackCounter[inChains[i]];
+        }
+
+        return (inChains, indices);
+    }
+
     function split(string memory _base, string memory _delimiter) internal pure returns (string[] memory splitArr) {
         bytes memory _baseBytes = bytes(_base);
 
@@ -452,7 +486,7 @@ contract Broker {
 contract Transfer {
     function interchainRollback(string memory sender, uint64 val) public returns (bool);
 
-    function interchainCharge(string memory sender, string memory receiver, uint64 val)  public returns (bool);
+    function interchainCharge(string memory sender, string memory receiver, uint64 val, bool isRollback)  public returns (bool);
 }
 
 contract DataSwapper {

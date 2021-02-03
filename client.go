@@ -167,6 +167,10 @@ func (c *Client) SubmitIBTP(ibtp *pb.IBTP) (*pb.SubmitIBTPResponse, error) {
 		[]byte(content.DstContractId),
 	)
 	args = append(args, content.Args...)
+	if ibtp.Type == pb.IBTP_ROLLBACK {
+		// use an unexist contract address, so only inCounter will be increased
+		args[2] = []byte("0x0000000000000000000000000000000000ffffff")
+	}
 	if pb.IBTP_ASSET_EXCHANGE_REDEEM == ibtp.Type || pb.IBTP_ASSET_EXCHANGE_REFUND == ibtp.Type {
 		args = append(args, ibtp.Extra)
 	}
@@ -217,8 +221,8 @@ func (c *Client) SubmitIBTP(ibtp *pb.IBTP) (*pb.SubmitIBTPResponse, error) {
 				return ret, fmt.Errorf("unpack log: %w", err)
 			}
 
+			result = append(result, content.Args[2:len(content.Args)-1]...)
 			status = out.Status
-			result = append(result, []byte(strconv.FormatBool(out.Status)))
 			//default:
 			//	return ret, fmt.Errorf("unsupported method")
 		}
@@ -239,7 +243,7 @@ func (c *Client) SubmitIBTP(ibtp *pb.IBTP) (*pb.SubmitIBTPResponse, error) {
 		newArgs = append(newArgs, result...)
 	case "interchainCharge":
 		newArgs = append(newArgs, []byte(strconv.FormatBool(status)), content.Args[0])
-		newArgs = append(newArgs, content.Args[2:]...)
+		newArgs = append(newArgs, content.Args[2:len(content.Args)-1]...)
 		responseStatus = status
 	case "interchainAssetExchangeRedeem":
 		newArgs = append(newArgs, args[3:]...)
@@ -364,6 +368,93 @@ func (c *Client) GetOutMeta() (map[string]uint64, error) {
 // executed on this appchain from different destination chains.
 func (c *Client) GetCallbackMeta() (map[string]uint64, error) {
 	return c.getMeta(c.session.GetCallbackMeta)
+}
+
+func (c *Client) RollbackIBTP(ibtp *pb.IBTP, isSrcChain bool) (*pb.RollbackIBTPResponse, error) {
+	ret := &pb.RollbackIBTPResponse{}
+	pd := &pb.Payload{}
+	if err := pd.Unmarshal(ibtp.Payload); err != nil {
+		return nil, fmt.Errorf("ibtp payload unmarshal: %w", err)
+	}
+	content := &pb.Content{}
+	if err := content.Unmarshal(pd.Content); err != nil {
+		return ret, fmt.Errorf("ibtp content unmarshal: %w", err)
+	}
+
+	// only support rollback for interchainCharge
+	if "interchainCharge" != content.Func {
+		return nil, nil
+	}
+
+	var rollbackArgs [][]byte
+	var rollbackFunc string
+	var args [][]byte
+	if isSrcChain {
+		rollbackFunc = content.Callback
+		rollbackArgs = append(rollbackArgs, []byte("false"), content.Args[0], content.Args[2])
+
+		args = append(args, []byte(ibtp.To),
+			[]byte(strconv.FormatUint(ibtp.Index, 10)),
+			[]byte(strings.ToLower(content.SrcContractId)))
+		args = append(args, rollbackArgs...)
+	} else {
+		rollbackFunc = content.Func
+		args = append(args, []byte(ibtp.From),
+			[]byte(strconv.FormatUint(ibtp.Index, 10)),
+			[]byte(strings.ToLower(content.DstContractId)))
+		args = append(args, content.Args...)
+		args[len(args)-1] = []byte("true")
+	}
+
+	resultArgs, err := solidity.ABIUnmarshal(c.abi, args, rollbackFunc)
+	if err != nil {
+		return ret, fmt.Errorf("unmarshal ibtp function abi args %w", err)
+	}
+
+	var (
+		tx *types.Transaction
+	)
+	if err := retry.Retry(func(attempt uint) error {
+		tx, err = c.broker.BrokerTransactor.contract.Transact(&c.session.TransactOpts, rollbackFunc, resultArgs...)
+		if err != nil {
+			logger.Info("Invoke contract failed",
+				"func", rollbackFunc,
+				"args", string(bytes.Join(args, []byte(","))),
+				"error", err,
+			)
+			return err
+		}
+
+		return nil
+	}, strategy.Wait(2*time.Second)); err != nil {
+		logger.Error("Can't invoke contract", "error", err)
+	}
+
+	receipt := c.waitForMined(tx.Hash())
+	if len(receipt.Logs) == 0 {
+		ret.Status = false
+		ret.Message = "wrong contract doesn't emit log event"
+	}
+	for _, lg := range receipt.Logs {
+		switch eventSigs[lg.Topics[0].Hex()] {
+		case "logInterchainStatus":
+			out, err := c.broker.BrokerFilterer.ParseLogInterchainStatus(*lg)
+			if err != nil {
+				return ret, fmt.Errorf("unpack log: %w", err)
+			}
+			ret.Status = out.Status
+		}
+	}
+
+	return ret, nil
+}
+
+func (c *Client) GetSrcRollbackMeta() (map[string]uint64, error) {
+	return c.getMeta(c.session.GetSrcRollbackMeta)
+}
+
+func (c *Client) GetDstRollbackMeta() (map[string]uint64, error) {
+	return c.getMeta(c.session.GetDstRollbackMeta)
 }
 
 func (c *Client) CommitCallback(ibtp *pb.IBTP) error {
