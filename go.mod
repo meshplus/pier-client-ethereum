@@ -9,7 +9,9 @@ require (
 	github.com/ethereum/go-ethereum v1.10.1
 	github.com/hashicorp/go-hclog v0.0.0-20180709165350-ff2cf002a8dd
 	github.com/hashicorp/go-plugin v1.3.0
+	github.com/lestrrat-go/strftime v1.0.3 // indirect
 	github.com/meshplus/bitxhub-model v1.1.2-0.20210312014622-c3ad532b64ad
+	github.com/meshplus/go-lightp2p v0.0.0-20200817105923-6b3aee40fa54 // indirect
 	github.com/meshplus/pier v1.5.1-0.20210317100012-16a672ae89f5
 	github.com/pkg/errors v0.9.1
 	github.com/spf13/viper v1.7.0
