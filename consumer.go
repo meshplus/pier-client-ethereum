@@ -11,7 +11,7 @@ func (c *Client) StartConsumer() error {
 		for {
 			select {
 			case ev := <-ch:
-				c.eventC <- Convert2IBTP(ev, c.pierID, pb.IBTP_INTERCHAIN)
+				c.eventC <- Convert2IBTP(ev, c.selfMethod, pb.IBTP_INTERCHAIN)
 			case <-c.ctx.Done():
 				return
 			}

@@ -4,6 +4,7 @@ go 1.13
 
 require (
 	github.com/Rican7/retry v0.1.0
+	github.com/bitxhub/bitxid v0.2.0
 	github.com/cloudflare/cfssl v1.4.1
 	github.com/ethereum/go-ethereum v1.10.1
 	github.com/hashicorp/go-hclog v0.0.0-20180709165350-ff2cf002a8dd

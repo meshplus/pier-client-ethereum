@@ -14,6 +14,7 @@ import (
 
 	"github.com/Rican7/retry"
 	"github.com/Rican7/retry/strategy"
+	"github.com/bitxhub/bitxid"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
@@ -31,16 +32,16 @@ import (
 
 //go:generate abigen --sol ./example/broker.sol --pkg main --out broker.go
 type Client struct {
-	abi       abi.ABI
-	config    *Config
-	ctx       context.Context
-	ethClient *ethclient.Client
-	broker    *Broker
-	session   *BrokerSession
-	conn      *rpc.Client
-	eventC    chan *pb.IBTP
-	pierID    string
-	bizABI    map[string]*abi.ABI
+	abi        abi.ABI
+	config     *Config
+	ctx        context.Context
+	ethClient  *ethclient.Client
+	broker     *Broker
+	session    *BrokerSession
+	conn       *rpc.Client
+	eventC     chan *pb.IBTP
+	selfMethod string // the method of connected appchain like did:bitxhub:appchain:.
+	bizABI     map[string]*abi.ABI
 }
 
 var (
@@ -55,7 +56,7 @@ var (
 
 const InvokeInterchain = "invokeInterchain"
 
-func (c *Client) Initialize(configPath string, pierID string, extra []byte) error {
+func (c *Client) Initialize(configPath string, selfMethod string, extra []byte) error {
 	cfg, err := UnmarshalConfig(configPath)
 	if err != nil {
 		return fmt.Errorf("unmarshal config for plugin :%w", err)
@@ -132,7 +133,7 @@ func (c *Client) Initialize(configPath string, pierID string, extra []byte) erro
 	c.session = session
 	c.abi = ab
 	c.conn = conn
-	c.pierID = pierID
+	c.selfMethod = selfMethod
 	c.ctx = context.Background()
 	c.bizABI = bizAbi
 
@@ -261,14 +262,14 @@ func (c *Client) SubmitIBTP(ibtp *pb.IBTP) (*pb.SubmitIBTPResponse, error) {
 	return ret, nil
 }
 
-func (c *Client) InvokeInterchain(srcChainID string, index uint64, destAddr string, category pb.IBTP_Category, bizCallData []byte) (*types.Receipt, error) {
+func (c *Client) InvokeInterchain(srcChainMethod string, index uint64, destAddr string, category pb.IBTP_Category, bizCallData []byte) (*types.Receipt, error) {
 	var tx *types.Transaction
 	var txErr error
 	if err := retry.Retry(func(attempt uint) error {
-		tx, txErr = c.session.InvokeInterchain(common.HexToAddress(srcChainID), index, common.HexToAddress(destAddr), category == pb.IBTP_REQUEST, bizCallData)
+		tx, txErr = c.session.InvokeInterchain(srcChainMethod, index, common.HexToAddress(destAddr), category == pb.IBTP_REQUEST, bizCallData)
 		if txErr != nil {
 			logger.Info("Call InvokeInterchain failed",
-				"srcChainID", srcChainID,
+				"srcChainMethod", srcChainMethod,
 				"index", fmt.Sprintf("%d", index),
 				"destAddr", destAddr,
 				"error", txErr.Error(),
@@ -283,14 +284,14 @@ func (c *Client) InvokeInterchain(srcChainID string, index uint64, destAddr stri
 	return c.waitForConfirmed(tx.Hash()), nil
 }
 
-func (c *Client) InvokeIndexUpdateWithError(srcChainID string, index uint64, category pb.IBTP_Category, errMsg string) (bool, error) {
+func (c *Client) InvokeIndexUpdateWithError(srcChainMethod string, index uint64, category pb.IBTP_Category, errMsg string) (bool, error) {
 	var tx *types.Transaction
 	var txErr error
 	if err := retry.Retry(func(attempt uint) error {
-		tx, txErr = c.session.InvokeIndexUpdateWithError(common.HexToAddress(srcChainID), index, category == pb.IBTP_REQUEST, errMsg)
+		tx, txErr = c.session.InvokeIndexUpdateWithError(srcChainMethod, index, category == pb.IBTP_REQUEST, errMsg)
 		if txErr != nil {
 			logger.Info("Call InvokeIndexUpdateWithError failed",
-				"srcChainID", srcChainID,
+				"srcChainMethod", srcChainMethod,
 				"index", fmt.Sprintf("%d", index),
 				"error", txErr.Error(),
 			)
@@ -315,7 +316,7 @@ func (c *Client) GetOutMessage(to string, idx uint64) (*pb.IBTP, error) {
 	var blockNum *big.Int
 	if err := retry.Retry(func(attempt uint) error {
 		var err error
-		blockNum, err = c.session.GetOutMessage(common.HexToAddress(to), idx)
+		blockNum, err = c.session.GetOutMessage(to, idx)
 		if err != nil {
 			logger.Error("get out message", "err", err.Error())
 		}
@@ -343,29 +344,29 @@ func (c *Client) GetOutMessage(to string, idx uint64) (*pb.IBTP, error) {
 
 	for throwEvents.Next() {
 		ev := throwEvents.Event
-		if ev.To.String() == to && ev.Index == idx {
-			return Convert2IBTP(ev, c.pierID, pb.IBTP_INTERCHAIN), nil
+		if bitxid.DID(ev.DestDID).GetMethod() == to && ev.Index == idx {
+			return Convert2IBTP(ev, c.selfMethod, pb.IBTP_INTERCHAIN), nil
 		}
 	}
 
 	return nil, fmt.Errorf("cannot find out ibtp for to %s and index %d", to, idx)
 }
 
-func (c *Client) getMeta(method func() ([]common.Address, []uint64, error)) (map[string]uint64, error) {
+func (c *Client) getMeta(method func() ([]string, []uint64, error)) (map[string]uint64, error) {
 	var (
-		addresses []common.Address
-		indices   []uint64
-		err       error
+		didMethods []string
+		indices    []uint64
+		err        error
 	)
 	meta := make(map[string]uint64, 0)
 
-	addresses, indices, err = method()
+	didMethods, indices, err = method()
 	if err != nil {
 		return nil, err
 	}
 
-	for i, addr := range addresses {
-		meta[strings.ToLower(addr.Hex())] = indices[i]
+	for i, did := range didMethods {
+		meta[did] = indices[i]
 	}
 
 	return meta, nil
@@ -376,7 +377,7 @@ func (c *Client) GetInMessage(from string, idx uint64) ([][]byte, error) {
 	var blockNum *big.Int
 	if err := retry.Retry(func(attempt uint) error {
 		var err error
-		blockNum, err = c.session.GetInMessage(common.HexToAddress(from), idx)
+		blockNum, err = c.session.GetInMessage(from, idx)
 		if err != nil {
 			logger.Error("get in message", "err", err.Error())
 		}

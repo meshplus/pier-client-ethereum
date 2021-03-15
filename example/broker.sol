@@ -1,4 +1,5 @@
 pragma solidity >=0.5.6;
+pragma experimental ABIEncoderV2;
 
 contract Broker {
     // Only the contract in the whitelist can invoke the Broker for interchain operations.
@@ -6,21 +7,21 @@ contract Broker {
     address[] contracts;
     address[] admins;
 
-    event throwEvent(uint64 index, address to, address fid, string tid, string funcs, string args, string argscb, string argsrb);
+    event throwEvent(uint64 index, string destDID, address fid, string funcs, string args, string argscb, string argsrb);
     event LogInterchainData(bool status, string data);
     event LogInterchainStatus(bool status);
 
-    address[] outChains;
-    address[] inChains;
-    address[] callbackChains;
+    string[] outChains;
+    string[] inChains;
+    string[] callbackChains;
 
-    mapping(address => uint64) outCounter; // mapping from contract address to out event last index
-    mapping(address => mapping(uint64 => uint)) outMessages;
-    mapping(address => uint64) inCounter;
-    mapping(address => mapping(uint64 => uint)) inMessages;
-    mapping(address => uint64) callbackCounter;
-    mapping(address => mapping(uint64 => string)) invokeError;
-    mapping(address => mapping(uint64 => string)) callbackError;
+    mapping(string => uint64) outCounter; // mapping from contract address to out event last index
+    mapping(string => mapping(uint64 => uint)) outMessages;
+    mapping(string => uint64) inCounter;
+    mapping(string => mapping(uint64 => uint)) inMessages;
+    mapping(string => uint64) callbackCounter;
+    mapping(string => mapping(uint64 => string)) invokeError;
+    mapping(string => mapping(uint64 => string)) callbackError;
 
     // Authority control. Contracts need to be registered.
     modifier onlyWhiteList {
@@ -71,9 +72,9 @@ contract Broker {
         return true;
     }
 
-    function invokeInterchain(address srcChainID, uint64 index, address destAddr, bool req, bytes calldata bizCallData) payable external {
+    function invokeInterchain(string calldata srcChainMethod, uint64 index, address destAddr, bool req, bytes calldata bizCallData) payable external {
         require(whiteList[destAddr] == 1);
-        invokeIndexUpdate(srcChainID, index, req, "");
+        invokeIndexUpdate(srcChainMethod, index, req, "");
 
         assembly {
             let ptr := mload(0x40)
@@ -103,48 +104,48 @@ contract Broker {
         }
     }
 
-    function invokeIndexUpdate(address srcChainID, uint64 index, bool req, string memory err) private {
+    function invokeIndexUpdate(string memory srcChainMethod, uint64 index, bool req, string memory err) private {
         if (req) {
-            require(inCounter[srcChainID] + 1 == index);
-            markInCounter(srcChainID);
+            require(inCounter[srcChainMethod] + 1 == index);
+            markInCounter(srcChainMethod);
             if (keccak256(abi.encodePacked(err)) != keccak256(abi.encodePacked(""))) {
-                invokeError[srcChainID][index] = err;
+                invokeError[srcChainMethod][index] = err;
             }
         } else {
             // invoke callback or rollback
-            require(callbackCounter[srcChainID] + 1 == index);
-            markCallbackCounter(srcChainID, index);
+            require(callbackCounter[srcChainMethod] + 1 == index);
+            markCallbackCounter(srcChainMethod, index);
             if (keccak256(abi.encodePacked(err)) != keccak256(abi.encodePacked(""))) {
-                callbackError[srcChainID][index] = err;
+                callbackError[srcChainMethod][index] = err;
             }
         }
     }
 
-    function invokeIndexUpdateWithError(address srcChainID, uint64 index, bool req, string memory err) public {
-        invokeIndexUpdate(srcChainID, index, req, err);
+    function invokeIndexUpdateWithError(string memory srcChainMethod, uint64 index, bool req, string memory err) public {
+        invokeIndexUpdate(srcChainMethod, index, req, err);
     }
 
     function emitInterchainEvent(
-        address destChainID,
-        string memory destAddr,
+        string memory destContractDID,
         string memory funcs,
         string memory args,
         string memory argscb,
         string memory argsrb)
     public onlyWhiteList {
         // Record the order of interchain contract which has been started.
-        outCounter[destChainID]++;
-        if (outCounter[destChainID] == 1) {
-            outChains.push(destChainID);
+        string memory destChainMethod = parseMethod(destContractDID);
+        outCounter[destChainMethod]++;
+        if (outCounter[destChainMethod] == 1) {
+            outChains.push(destChainMethod);
         }
-        outMessages[destChainID][outCounter[destChainID]] = block.number;
+        outMessages[destChainMethod][outCounter[destChainMethod]] = block.number;
 
         // Throw interchain event for listening of plugin.
-        emit throwEvent(outCounter[destChainID], destChainID, msg.sender, destAddr, funcs, args, argscb, argsrb);
+        emit throwEvent(outCounter[destChainMethod], destContractDID, msg.sender, funcs, args, argscb, argsrb);
     }
 
     // The helper functions that help document Meta information.
-    function markCallbackCounter(address from, uint64 index) private {
+    function markCallbackCounter(string memory from, uint64 index) private {
         if (callbackCounter[from] == 0) {
             callbackChains.push(from);
         }
@@ -152,7 +153,7 @@ contract Broker {
         inMessages[from][callbackCounter[from]] = block.number;
     }
 
-    function markInCounter(address from) private {
+    function markInCounter(string memory from) private {
         inCounter[from]++;
         if (inCounter[from] == 1) {
             inChains.push(from);
@@ -162,7 +163,7 @@ contract Broker {
     }
 
     // The helper functions that help plugin query.
-    function getOuterMeta() public view returns(address[] memory, uint64[] memory) {
+    function getOuterMeta() public view returns(string[] memory, uint64[] memory) {
         uint64[] memory indices = new uint64[](outChains.length);
         for (uint64 i = 0; i < outChains.length; i++) {
             indices[i] = outCounter[outChains[i]];
@@ -171,15 +172,17 @@ contract Broker {
         return (outChains, indices);
     }
 
-    function getOutMessage(address to, uint64 idx) public view returns (uint) {
+    function getOutMessage(string memory to, uint64 idx) public view returns (uint) {
+        validDID(to);
         return outMessages[to][idx];
     }
 
-    function getInMessage(address from, uint64 idx) public view returns (uint)  {
+    function getInMessage(string memory from, uint64 idx) public view returns (uint)  {
+        validDID(from);
         return inMessages[from][idx];
     }
 
-    function getInnerMeta() public view returns(address[] memory, uint64[] memory) {
+    function getInnerMeta() public view returns (string[] memory, uint64[] memory) {
         uint64[] memory indices = new uint64[](inChains.length);
         for (uint i = 0; i < inChains.length; i++) {
             indices[i] = inCounter[inChains[i]];
@@ -188,13 +191,125 @@ contract Broker {
         return (inChains, indices);
     }
 
-    function getCallbackMeta() public view returns(address[] memory, uint64[] memory) {
+    function getCallbackMeta() public view returns (string[] memory, uint64[] memory) {
         uint64[] memory indices = new uint64[](callbackChains.length);
         for (uint64 i = 0; i < callbackChains.length; i++) {
             indices[i] = callbackCounter[callbackChains[i]];
         }
 
         return (callbackChains, indices);
+    }
+
+    function validDID(string memory did) internal pure {
+        string[] memory splitArr = split(did, ":");
+        require(splitArr.length==4, "did is not in four part");
+        require(compareStrings(splitArr[0], "did"), "prefix is not did");
+        for (uint256 i=1;i<4;i++) {
+            bytes memory tmp = bytes(splitArr[i]);
+            require(tmp.length!=0, "did subset is empty");
+        }
+    }
+
+    function parseMethod(string memory did) internal pure returns(string memory) {
+        string[] memory splitArr = split(did, ":");
+        // check did format
+        require(splitArr.length==4, "did is not legal format");
+        require(compareStrings(splitArr[0], "did"), "did is not legal format");
+        for (uint256 i=1;i<4;i++) {
+            bytes memory tmp = bytes(splitArr[i]);
+            require(tmp.length!=0, "did subset is empty");
+        }
+
+        string memory method = concat(toSlice(splitArr[0]), toSlice(":"));
+        method = concat(toSlice(method), toSlice(splitArr[1]));
+        method = concat(toSlice(method), toSlice(":"));
+        method = concat(toSlice(method), toSlice(splitArr[2]));
+        method = concat(toSlice(method), toSlice(":"));
+        method = concat(toSlice(method), toSlice("."));
+        return method;
+    }
+
+    function compareStrings(string memory a, string memory b) public pure returns (bool) {
+        return (keccak256(abi.encodePacked((a))) == keccak256(abi.encodePacked((b))));
+    }
+
+    struct slice {
+        uint _len;
+        uint _ptr;
+    }
+
+    function toSlice(string memory self) internal pure returns (slice memory) {
+        uint ptr;
+        assembly {
+            ptr := add(self, 0x20)
+        }
+        return slice(bytes(self).length, ptr);
+    }
+
+    function concat(slice memory self, slice memory other) internal pure returns (string memory) {
+        string memory ret = new string(self._len + other._len);
+        uint retptr;
+        assembly { retptr := add(ret, 32) }
+        memcpy(retptr, self._ptr, self._len);
+        memcpy(retptr + self._len, other._ptr, other._len);
+        return ret;
+    }
+
+    function memcpy(uint dest, uint src, uint len) private pure {
+        // Copy word-length chunks while possible
+        for(; len >= 32; len -= 32) {
+            assembly {
+                mstore(dest, mload(src))
+            }
+            dest += 32;
+            src += 32;
+        }
+
+        // Copy remaining bytes
+        uint mask = 256 ** (32 - len) - 1;
+        assembly {
+            let srcpart := and(mload(src), not(mask))
+            let destpart := and(mload(dest), mask)
+            mstore(dest, or(destpart, srcpart))
+        }
+    }
+
+    function split(string memory _base, string memory _delimiter) internal pure returns (string[] memory splitArr) {
+        bytes memory _baseBytes = bytes(_base);
+
+        uint _offset = 0;
+        uint _splitsCount = 1;
+        while (_offset < _baseBytes.length - 1) {
+            int _limit = _indexOf(_base, _delimiter, _offset);
+            if (_limit == - 1)
+                break;
+            else {
+                _splitsCount++;
+                _offset = uint(_limit) + 1;
+            }
+        }
+
+        splitArr = new string[](_splitsCount);
+
+        _offset = 0;
+        _splitsCount = 0;
+        while (_offset <= _baseBytes.length - 1) {
+            int _limit = _indexOf(_base, _delimiter, _offset);
+            if (_limit == - 1) {
+                _limit = int(_baseBytes.length);
+            }
+
+            string memory _tmp = new string(uint(_limit) - _offset);
+            bytes memory _tmpBytes = bytes(_tmp);
+
+            uint j = 0;
+            for (uint i = _offset; i < uint(_limit); i++) {
+                _tmpBytes[j++] = _baseBytes[i];
+            }
+            _offset = uint(_limit) + 1;
+            splitArr[_splitsCount++] = string(_tmpBytes);
+        }
+        return splitArr;
     }
 
     function _indexOf(string memory _base, string memory _value, uint _offset) internal pure returns (int) {
