@@ -18,6 +18,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -39,14 +40,10 @@ type Client struct {
 	conn      *rpc.Client
 	eventC    chan *pb.IBTP
 	pierID    string
+	bizABI    map[string]*abi.ABI
 }
 
 var (
-	eventSigs = map[string]string{
-		"0x436160f7c24c5f31561ec9422a629accdbbd4e9e8ce21e86e634f497997769a8": "logInterchainData",
-		"0x23de11857b4338b8e6ccaec81162b447b44040ff3cfdd1174d548975eb5c1c3e": "logInterchainStatus",
-		"0xad89cfa05a757be8d2179bb6609bf9034971b2427bd49d48e79552d3e8493e99": "interchainEvent",
-	}
 	_      plugins.Client = (*Client)(nil)
 	logger                = hclog.New(&hclog.LoggerOptions{
 		Name:   "client",
@@ -55,6 +52,8 @@ var (
 	})
 	EtherType = "ethereum"
 )
+
+const InvokeInterchain = "invokeInterchain"
 
 func (c *Client) Initialize(configPath string, pierID string, extra []byte) error {
 	cfg, err := UnmarshalConfig(configPath)
@@ -102,8 +101,7 @@ func (c *Client) Initialize(configPath string, pierID string, extra []byte) erro
 		TransactOpts: *auth,
 	}
 
-	b, err := ioutil.ReadFile(filepath.Join(configPath, cfg.Ether.AbiPath))
-	ab, err := abi.JSON(bytes.NewReader(b))
+	ab, err := abi.JSON(bytes.NewReader([]byte(BrokerABI)))
 	if err != nil {
 		return fmt.Errorf("abi unmarshal: %s", err.Error())
 	}
@@ -111,6 +109,20 @@ func (c *Client) Initialize(configPath string, pierID string, extra []byte) erro
 	conn, err := rpc.Dial(cfg.Ether.Addr)
 	if err != nil {
 		return fmt.Errorf("rpc dial: %s", err.Error())
+	}
+
+	bizAbi := make(map[string]*abi.ABI)
+	for addr, name := range cfg.ContractABI {
+		logger.Info("ContractABI", "addr", addr, "name", name)
+		content, err := ioutil.ReadFile(filepath.Join(configPath, name))
+		if err != nil {
+			return fmt.Errorf("read abi %s for addr %s: %w", name, addr, err)
+		}
+		abi, err := abi.JSON(bytes.NewReader(content))
+		if err != nil {
+			return fmt.Errorf("unmarshal abi %s for addr %s: %s", name, addr, err.Error())
+		}
+		bizAbi[addr] = &abi
 	}
 
 	c.config = cfg
@@ -122,6 +134,8 @@ func (c *Client) Initialize(configPath string, pierID string, extra []byte) erro
 	c.conn = conn
 	c.pierID = pierID
 	c.ctx = context.Background()
+	c.bizABI = bizAbi
+
 	return nil
 }
 
@@ -160,96 +174,86 @@ func (c *Client) SubmitIBTP(ibtp *pb.IBTP) (*pb.SubmitIBTPResponse, error) {
 		return ret, fmt.Errorf("ibtp content unmarshal: %w", err)
 	}
 
-	args := make([][]byte, 0)
-	args = append(args,
-		[]byte(ibtp.From),
-		[]byte(strconv.FormatUint(ibtp.Index, 10)),
-		[]byte(content.DstContractId),
-	)
-	args = append(args, content.Args...)
-	if pb.IBTP_ASSET_EXCHANGE_REDEEM == ibtp.Type || pb.IBTP_ASSET_EXCHANGE_REFUND == ibtp.Type {
-		args = append(args, ibtp.Extra)
-	}
-	resultArgs, err := solidity.ABIUnmarshal(c.abi, args, content.Func)
-	if err != nil {
-		return ret, fmt.Errorf("unmarshal ibtp function abi args %w", err)
+	if ibtp.Category() == pb.IBTP_UNKNOWN {
+		return nil, fmt.Errorf("invalid ibtp category")
 	}
 
-	var (
-		tx *types.Transaction
-	)
-	if err := retry.Retry(func(attempt uint) error {
-		tx, err = c.broker.BrokerTransactor.contract.Transact(&c.session.TransactOpts, content.Func, resultArgs...)
+	var result [][]byte
+	logger.Info("submit ibtp", "id", ibtp.ID(), "contract", content.DstContractId, "func", content.Func)
+	for i, arg := range content.Args {
+		logger.Info("arg", strconv.Itoa(i), string(arg))
+	}
+
+	if ibtp.Category() == pb.IBTP_RESPONSE && content.Func == "" {
+		logger.Info("InvokeIndexUpdate", "ibtp", ibtp.ID())
+		success, err := c.InvokeIndexUpdate(ibtp.From, ibtp.Index, ibtp.Category())
 		if err != nil {
-			logger.Info("Invoke contract failed",
-				"func", content.Func,
-				"args", string(bytes.Join(content.Args, []byte(","))),
-				"error", err,
-			)
-			return err
+			return nil, err
 		}
-
-		return nil
-	}, strategy.Wait(2*time.Second)); err != nil {
-		logger.Error("Can't invoke contract", "error", err)
-	}
-
-	// get transaction result from subscription
-	var (
-		result [][]byte
-		status bool
-	)
-
-	receipt := c.waitForMined(tx.Hash())
-
-	for _, lg := range receipt.Logs {
-		switch eventSigs[lg.Topics[0].Hex()] {
-		case "logInterchainData":
-			out, err := c.broker.BrokerFilterer.ParseLogInterchainData(*lg)
-			if err != nil {
-				return ret, fmt.Errorf("unpack log: %w", err)
-			}
-			status = out.Status
-			result = append(result, []byte(strconv.FormatBool(out.Status)), []byte(out.Data))
-		case "logInterchainStatus":
-			out, err := c.broker.BrokerFilterer.ParseLogInterchainStatus(*lg)
-			if err != nil {
-				return ret, fmt.Errorf("unpack log: %w", err)
-			}
-
-			status = out.Status
-			result = append(result, []byte(strconv.FormatBool(out.Status)))
-			//default:
-			//	return ret, fmt.Errorf("unsupported method")
+		if !success {
+			return nil, fmt.Errorf("update index for ibtp %s failed", ibtp.ID())
 		}
-	}
-
-	ret.Status = status
-	// If no callback function To invoke, then simply return
-	if content.Callback == "" {
+		ret.Status = true
 		return ret, nil
 	}
 
-	responseStatus := true
-	// execution invoke no err
-	var newArgs = make([][]byte, 0)
-	switch content.Func {
-	case "interchainGet":
-		newArgs = append(newArgs, content.Args[0])
-		newArgs = append(newArgs, result...)
-	case "interchainCharge":
-		newArgs = append(newArgs, []byte(strconv.FormatBool(status)), content.Args[0])
-		newArgs = append(newArgs, content.Args[2:]...)
-		responseStatus = status
-	case "interchainAssetExchangeRedeem":
-		newArgs = append(newArgs, args[3:]...)
-	case "interchainAssetExchangeRefund":
-		newArgs = append(newArgs, args[3:]...)
-	default:
-		newArgs = append(newArgs, result...)
+	var bizData []byte
+	var err error
+	bAbi, ok := c.bizABI[strings.ToLower(content.DstContractId)]
+	if !ok {
+		ret.Message = fmt.Sprintf("no abi for contract %s", content.DstContractId)
+	} else {
+		bizData, err = c.packFuncArgs(content.Func, content.Args, bAbi)
+		if err != nil {
+			ret.Message = fmt.Sprintf("pack for ibtp %s func %s and args: %s", ibtp.ID(), content.Func, err)
+		}
+	}
+	if !ok || err != nil {
+		ret.Status = false
+		success, err := c.InvokeIndexUpdateWithError(ibtp.From, ibtp.Index, ibtp.Category(), ret.Message)
+		if err != nil {
+			return nil, err
+		}
+		if !success {
+			return nil, fmt.Errorf("update index for ibtp %s failed", ibtp.ID())
+		}
+	} else {
+		receipt, err := c.InvokeInterchain(ibtp.From, ibtp.Index, content.DstContractId, ibtp.Category(), bizData)
+		if err != nil {
+			return nil, fmt.Errorf("invoke interchain for ibtp %s to call %s: %w", ibtp.ID(), content.Func, err)
+		}
+
+		for i, log := range receipt.Logs {
+			logger.Info("log", "index", strconv.Itoa(i), "data", hexutil.Encode(log.Data))
+		}
+
+		if receipt.Status == types.ReceiptStatusSuccessful {
+			if len(receipt.Logs) == 0 {
+				return nil, fmt.Errorf("no log found for ibtp %s", ibtp.ID())
+			}
+			ret.Status, result, err = solidity.Unpack(*bAbi, content.Func, receipt.Logs[len(receipt.Logs)-1].Data)
+			if err != nil {
+				return nil, fmt.Errorf("unpack for ibtp %s: %w", ibtp.ID(), err)
+			}
+		} else {
+			ret.Status = false
+			ret.Message = fmt.Sprintf("InvokeInterchain tx execution failed")
+			success, err := c.InvokeIndexUpdateWithError(ibtp.From, ibtp.Index, ibtp.Category(), ret.Message)
+			if err != nil {
+				return nil, err
+			}
+			if !success {
+				return ret, fmt.Errorf("invalid index for ibtp %s", ibtp.ID())
+			}
+		}
 	}
 
-	ret.Result, err = c.generateCallback(ibtp, newArgs, responseStatus)
+	// If is response IBTP, then simply return
+	if ibtp.Category() == pb.IBTP_RESPONSE {
+		return ret, nil
+	}
+
+	ret.Result, err = c.generateCallback(ibtp, result, ret.Status)
 	if err != nil {
 		return nil, err
 	}
@@ -257,63 +261,94 @@ func (c *Client) SubmitIBTP(ibtp *pb.IBTP) (*pb.SubmitIBTPResponse, error) {
 	return ret, nil
 }
 
-// GetOutMessage gets crosschain tx by `to` address and index
-func (c *Client) GetOutMessage(to string, idx uint64) (*pb.IBTP, error) {
-	blockNum, err := c.session.GetOutMessage(common.HexToAddress(to), idx)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Println(blockNum)
+func (c *Client) InvokeInterchain(srcChainID string, index uint64, destAddr string, category pb.IBTP_Category, bizCallData []byte) (*types.Receipt, error) {
+	var tx *types.Transaction
+	var txErr error
+	if err := retry.Retry(func(attempt uint) error {
+		tx, txErr = c.session.InvokeInterchain(common.HexToAddress(srcChainID), index, common.HexToAddress(destAddr), category == pb.IBTP_REQUEST, bizCallData)
+		if txErr != nil {
+			logger.Info("Call InvokeInterchain failed",
+				"srcChainID", srcChainID,
+				"index", fmt.Sprintf("%d", index),
+				"destAddr", destAddr,
+				"error", txErr.Error(),
+			)
+		}
 
-	return c.toIBTP(blockNum, idx)
+		return txErr
+	}, strategy.Wait(2*time.Second)); err != nil {
+		logger.Error("Can't invoke contract", "error", err)
+	}
+
+	return c.waitForConfirmed(tx.Hash()), nil
 }
 
-func (c *Client) toIBTP(blockNum *big.Int, idx uint64) (*pb.IBTP, error) {
-	var (
-		block *types.Block
-		err   error
-		ibtp  *pb.IBTP
-	)
-
+func (c *Client) InvokeIndexUpdateWithError(srcChainID string, index uint64, category pb.IBTP_Category, errMsg string) (bool, error) {
+	var tx *types.Transaction
+	var txErr error
 	if err := retry.Retry(func(attempt uint) error {
-		block, err = c.ethClient.BlockByNumber(c.ctx, blockNum)
+		tx, txErr = c.session.InvokeIndexUpdateWithError(common.HexToAddress(srcChainID), index, category == pb.IBTP_REQUEST, errMsg)
+		if txErr != nil {
+			logger.Info("Call InvokeIndexUpdateWithError failed",
+				"srcChainID", srcChainID,
+				"index", fmt.Sprintf("%d", index),
+				"error", txErr.Error(),
+			)
+		}
+
+		return txErr
+	}, strategy.Wait(2*time.Second)); err != nil {
+		logger.Error("Can't invoke contract", "error", err)
+	}
+
+	receipt := c.waitForConfirmed(tx.Hash())
+
+	return receipt.Status == types.ReceiptStatusSuccessful, nil
+}
+
+func (c *Client) InvokeIndexUpdate(srcChainID string, index uint64, category pb.IBTP_Category) (bool, error) {
+	return c.InvokeIndexUpdateWithError(srcChainID, index, category, "")
+}
+
+// GetOutMessage gets crosschain tx by `to` address and index
+func (c *Client) GetOutMessage(to string, idx uint64) (*pb.IBTP, error) {
+	var blockNum *big.Int
+	if err := retry.Retry(func(attempt uint) error {
+		var err error
+		blockNum, err = c.session.GetOutMessage(common.HexToAddress(to), idx)
 		if err != nil {
-			return err
+			logger.Error("get out message", "err", err.Error())
 		}
-
-		return nil
-	}, strategy.Wait(1*time.Second)); err != nil {
-		logger.Error("Query block by number failed", "error", err)
+		return err
+	}, strategy.Wait(time.Second*10)); err != nil {
+		logger.Info("retry error in get out message", "err", err.Error())
 	}
 
-	txs := block.Transactions()
-	for _, tx := range txs {
-		receipt, err := c.ethClient.TransactionReceipt(c.ctx, tx.Hash())
+	height := blockNum.Uint64()
+	var throwEvents *BrokerThrowEventIterator
+	if err := retry.Retry(func(attempt uint) error {
+		var err error
+		throwEvents, err = c.broker.FilterThrowEvent(&bind.FilterOpts{
+			Start:   height,
+			End:     &height,
+			Context: c.ctx,
+		})
 		if err != nil {
-			logger.Info("get receipt error")
-			continue
+			logger.Error("FilterThrowEvent", "err", err.Error())
 		}
+		return err
+	}, strategy.Wait(time.Second*3)); err != nil {
+		logger.Error("retry failed", "err", err.Error())
+	}
 
-		for _, lg := range receipt.Logs {
-			if eventSigs[lg.Topics[0].Hex()] != "interchainEvent" {
-				continue
-			}
-			ev, err := c.broker.BrokerFilterer.ParseThrowEvent(*lg)
-			if err != nil {
-				return nil, fmt.Errorf("unpack log: %w", err)
-			}
-			if ev.Index != idx {
-				continue
-			}
-			ibtp = Convert2IBTP(ev, c.pierID, pb.IBTP_INTERCHAIN)
-			break
+	for throwEvents.Next() {
+		ev := throwEvents.Event
+		if ev.To.String() == to && ev.Index == idx {
+			return Convert2IBTP(ev, c.pierID, pb.IBTP_INTERCHAIN), nil
 		}
 	}
 
-	if ibtp == nil {
-		return nil, fmt.Errorf("can't find historical event")
-	}
-	return ibtp, nil
+	return nil, fmt.Errorf("cannot find out ibtp for to %s and index %d", to, idx)
 }
 
 func (c *Client) getMeta(method func() ([]common.Address, []uint64, error)) (map[string]uint64, error) {
@@ -338,14 +373,19 @@ func (c *Client) getMeta(method func() ([]common.Address, []uint64, error)) (map
 
 // GetInMessage gets the execution results from contract by from-index key
 func (c *Client) GetInMessage(from string, idx uint64) ([][]byte, error) {
-	blockNum, err := c.session.GetInMessage(common.HexToAddress(from), idx)
-	if err != nil {
-		return nil, err
+	var blockNum *big.Int
+	if err := retry.Retry(func(attempt uint) error {
+		var err error
+		blockNum, err = c.session.GetInMessage(common.HexToAddress(from), idx)
+		if err != nil {
+			logger.Error("get in message", "err", err.Error())
+		}
+		return err
+	}); err != nil {
+		logger.Error("retry error in GetInMessage", "err", err.Error())
 	}
 
-	fmt.Println(blockNum)
-
-	return nil, nil
+	return [][]byte{blockNum.Bytes()}, nil
 }
 
 // GetInMeta queries contract about how many interchain txs have been
@@ -370,11 +410,50 @@ func (c *Client) CommitCallback(ibtp *pb.IBTP) error {
 	return nil
 }
 
-func (c *Client) waitForMined(hash common.Hash) *types.Receipt {
+func (c *Client) getBestBlock() uint64 {
+	var blockNum uint64
+
+	if err := retry.Retry(func(attempt uint) error {
+		var err error
+		blockNum, err = c.ethClient.BlockNumber(c.ctx)
+		return err
+	}, strategy.Wait(time.Second*10)); err != nil {
+		logger.Error("retry failed in get best block", "err", err.Error())
+		panic(err)
+	}
+
+	return blockNum
+}
+
+func (c *Client) getTxReceipt(txHash common.Hash) *types.Receipt {
+	var receipt *types.Receipt
+
+	if err := retry.Retry(func(attempt uint) error {
+		var err error
+		receipt, err = c.ethClient.TransactionReceipt(c.ctx, txHash)
+		if err != nil {
+			logger.Info("get receipt error", "err", err.Error())
+		}
+		return err
+	}, strategy.Wait(time.Second*10)); err != nil {
+		logger.Error("retry failed in get tx receipt", "err", err.Error())
+		panic(err)
+	}
+
+	return receipt
+}
+
+func (c *Client) waitForConfirmed(hash common.Hash) *types.Receipt {
 	var (
 		receipt *types.Receipt
 		err     error
 	)
+
+	start := c.getBestBlock()
+
+	for c.getBestBlock()-start < c.config.Ether.MinConfirm {
+		time.Sleep(time.Second * 5)
+	}
 	if err := retry.Retry(func(attempt uint) error {
 		receipt, err = c.ethClient.TransactionReceipt(c.ctx, hash)
 		if err != nil {
@@ -387,6 +466,81 @@ func (c *Client) waitForMined(hash common.Hash) *types.Receipt {
 	}
 
 	return receipt
+}
+
+func (c *Client) GetReceipt(ibtp *pb.IBTP) (*pb.IBTP, error) {
+	blockBytes, err := c.GetInMessage(ibtp.From, ibtp.Index)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(blockBytes) != 1 {
+		return nil, fmt.Errorf("GetInMessage can not get block number ")
+	}
+
+	blockNum := &big.Int{}
+	blockNum.SetBytes(blockBytes[0])
+
+	block, err := c.ethClient.BlockByNumber(c.ctx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
+	pl := &pb.Payload{}
+	if err := pl.Unmarshal(ibtp.Payload); err != nil {
+		return nil, err
+	}
+
+	ct := &pb.Content{}
+	if err := ct.Unmarshal(pl.Content); err != nil {
+		return nil, err
+	}
+
+	bAbi, ok := c.bizABI[strings.ToLower(ct.DstContractId)]
+	if !ok {
+		return nil, fmt.Errorf("can not find abi for contract %s", ct.DstContractId)
+	}
+	bizData, err := c.packFuncArgs(ct.Func, ct.Args, bAbi)
+	packData, err := c.abi.Pack(InvokeInterchain, common.HexToAddress(ibtp.From), ibtp.Index, common.HexToAddress(ct.DstContractId), ibtp.Category() == pb.IBTP_REQUEST, bizData)
+	if err != nil {
+		return nil, err
+	}
+	for _, tx := range block.Transactions() {
+		if tx.To().String() == c.config.Ether.ContractAddress && bytes.Equal(packData, tx.Data()) {
+			receipt := c.getTxReceipt(tx.Hash())
+			if len(receipt.Logs) == 0 || receipt.Status == types.ReceiptStatusFailed {
+				return c.generateCallback(ibtp, nil, false)
+			}
+
+			log := receipt.Logs[len(receipt.Logs)-1]
+			status, result, err := solidity.Unpack(*bAbi, ct.Func, log.Data)
+			if err != nil {
+				return nil, fmt.Errorf("unpack log data %s for func %s", hexutil.Encode(log.Data), ct.Func)
+			}
+			return c.generateCallback(ibtp, result, status)
+		}
+	}
+
+	return nil, fmt.Errorf("cannot find tx in block %s", blockNum.String())
+}
+
+func (c *Client) packFuncArgs(function string, args [][]byte, abi *abi.ABI) ([]byte, error) {
+	var argx []interface{}
+	var err error
+
+	if len(args) != 0 {
+		argx, err = solidity.ABIUnmarshal(*abi, args, function)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	packed, err := abi.Pack(function, argx...)
+	if err != nil {
+		return nil, err
+	}
+
+	return packed, nil
 }
 
 func main() {

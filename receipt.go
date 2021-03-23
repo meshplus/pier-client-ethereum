@@ -24,9 +24,16 @@ func (c *Client) generateCallback(original *pb.IBTP, args [][]byte, status bool)
 	content := &pb.Content{
 		SrcContractId: originalContent.DstContractId,
 		DstContractId: originalContent.SrcContractId,
-		Func:          originalContent.Callback,
-		Args:          args,
 	}
+
+	if status {
+		content.Func = originalContent.Callback
+		content.Args = append(originalContent.ArgsCb, args...)
+	} else {
+		content.Func = originalContent.Rollback
+		content.Args = originalContent.ArgsRb
+	}
+
 	b, err := content.Marshal()
 	if err != nil {
 		return nil, err
