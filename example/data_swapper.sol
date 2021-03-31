@@ -1,11 +1,9 @@
-pragma solidity >=0.5.7;
+pragma solidity >=0.5.6;
 
 contract DataSwapper {
     mapping(string => string) dataM; // map for accounts
-    Hasher hasher = Hasher(0x00000000000000000000000000000000000000fa);
     // change the address of Broker accordingly
-//    address BrokerAddr = 0x9E0901D698E854F6CFE9e478C38d20A01908768a;
-    address BrokerAddr = 0x2346f3BA3F0B6676aa711595daB8A27d0317DB57;
+    address BrokerAddr = 0x97135d4d2578dd2347FF5382db77553bE50bff3f;
     Broker broker = Broker(BrokerAddr);
 
     // AccessControl
@@ -14,14 +12,13 @@ contract DataSwapper {
         _;
     }
 
-    // 数据交换类的业务合约
+    // contract for data exchange
     function getData(string memory key) public returns(string memory) {
         return dataM[key];
     }
 
     function get(address destChainID, string memory destAddr, string memory key) public {
-        bool ok = broker.InterchainDataSwapInvoke(destChainID, destAddr, key);
-        require(ok);
+        broker.emitInterchainEvent(destChainID, destAddr, "interchainGet,interchainSet,", key, key, "");
     }
 
     function set(string memory key, string memory value) public {
@@ -32,15 +29,17 @@ contract DataSwapper {
         set(key, value);
     }
 
-    function interchainGet(string memory key) public onlyBroker view returns(bool, string memory) {
+    function interchainGet(string memory key) public onlyBroker returns(bool, string memory) {
         return (true, dataM[key]);
     }
 }
 
-contract Broker {
-    function InterchainDataSwapInvoke(address destChainID, string memory destAddr, string memory key) public returns(bool);
-}
-
-contract Hasher {
-    function getHash() public returns(bytes32);
+abstract contract Broker {
+    function emitInterchainEvent(
+        address destChainID,
+        string memory destAddr,
+        string memory funcs,
+        string memory args,
+        string memory argscb,
+        string memory argsrb) virtual public;
 }

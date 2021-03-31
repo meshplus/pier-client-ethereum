@@ -42,6 +42,37 @@ func getMethod(ab abi.ABI, method string) (abi.Method, error) {
 	return abi.Method{}, fmt.Errorf("method %s is not existed", method)
 }
 
+func Unpack(abi abi.ABI, function string, data []byte) (bool, [][]byte, error) {
+	ret, err := UnpackOutput(abi, function, string(data))
+	if err != nil {
+		return false, nil, fmt.Errorf("unpack return %w", err)
+	}
+
+	if ret == nil {
+		return true, nil, nil
+	}
+
+	str := make([][]byte, 0)
+	for _, r := range ret {
+		if reflect.TypeOf(r).String() == "[32]uint8" {
+			v, ok := r.([32]byte)
+			if ok {
+				r = string(v[:])
+			}
+		}
+		bs := []byte(fmt.Sprintf("%v", r))
+		str = append(str, bs)
+	}
+
+	// the first returned value is always true or false
+	switch string(str[0]) {
+	case "true":
+		return true, str[1:], nil
+	default:
+		return false, str[1:], nil
+	}
+}
+
 func UnpackOutput(abi abi.ABI, method string, receipt string) ([]interface{}, error) {
 	m, err := getMethod(abi, method)
 	if err != nil {
@@ -52,29 +83,7 @@ func UnpackOutput(abi abi.ABI, method string, receipt string) ([]interface{}, er
 		return nil, nil
 	}
 
-	if len(m.Outputs) == 1 {
-		p, t := getSinglePacker(m.Outputs)
-		if err := abi.Unpack(p, method, []byte(receipt)); err != nil {
-			return nil, fmt.Errorf("unpack result %w", err)
-		}
-
-		return []interface{}{unpackResult(p, t)}, nil
-	} else {
-		p := getPacker(m.Outputs)
-		if err := abi.Unpack(&p.packers, method, []byte(receipt)); err != nil {
-			return nil, err
-		}
-
-		ts := strings.Split(p.types, ",")
-
-		ret := make([]interface{}, len(p.packers))
-		for i, r := range p.packers {
-			ret[i] = unpackResult(r, ts[i])
-		}
-
-		return ret, nil
-
-	}
+	return abi.Unpack(method, []byte(receipt))
 }
 
 type packer struct {

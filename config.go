@@ -12,16 +12,17 @@ const (
 )
 
 type Config struct {
-	Ether Ether `toml:"ether" json:"ether"`
+	Ether       Ether             `toml:"ether" json:"ether"`
+	ContractABI map[string]string `mapstructure:"contract_abi" json:"contract_abi"`
 }
 
 type Ether struct {
 	Addr            string `toml:"addr" json:"addr"`
 	Name            string `toml:"name" json:"name"`
 	ContractAddress string `mapstructure:"contract_address" json:"contract_address"`
-	AbiPath         string `mapstructure:"abi_path" json:"abi_path"`
 	KeyPath         string `mapstructure:"key_path" json:"key_path"`
 	Password        string `toml:"password" json:"password"`
+	MinConfirm      uint64 `mapstructure:"min_confirm" json:"min_confirm"`
 }
 
 func defaultConfig() *Config {
@@ -30,9 +31,9 @@ func defaultConfig() *Config {
 			Addr:            "https://mainnet.infura.io",
 			Name:            "Ethereum",
 			ContractAddress: "0xD3880ea40670eD51C3e3C0ea089fDbDc9e3FBBb4",
-			AbiPath:         "broker.abi",
 			KeyPath:         "account.key",
 			Password:        "",
+			MinConfirm:      5,
 		},
 	}
 }

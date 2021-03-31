@@ -16,22 +16,6 @@ func Convert2IBTP(ev *BrokerThrowEvent, from string, ibtpType pb.IBTP_Type) *pb.
 		log.Fatalf("Get ibtp payload :%s", err)
 	}
 
-	// TODO: generate proof for init and redeem
-	var extra []byte
-	if ev.Func == "interchainAssetExchangeInit" {
-		ibtpType = pb.IBTP_ASSET_EXCHANGE_INIT
-		extra, err = generateExtra(ev.Args, ibtpType)
-		if err != nil {
-			log.Fatalf("generate extra for asset exchange init :%s", err)
-		}
-	} else if ev.Func == "interchainAssetExchangeRedeem" {
-		ibtpType = pb.IBTP_ASSET_EXCHANGE_REDEEM
-		extra = []byte(ev.Args)
-	} else if ev.Func == "interchainAssetExchangeRefund" {
-		ibtpType = pb.IBTP_ASSET_EXCHANGE_REFUND
-		extra = []byte(ev.Args)
-	}
-
 	return &pb.IBTP{
 		From:      from,
 		To:        ev.To.String(),
@@ -40,22 +24,33 @@ func Convert2IBTP(ev *BrokerThrowEvent, from string, ibtpType pb.IBTP_Type) *pb.
 		Timestamp: time.Now().UnixNano(),
 		Proof:     []byte("1"),
 		Payload:   pd,
-		Extra:     extra,
 	}
 }
 
-func encryptPayload(ev *BrokerThrowEvent) ([]byte, error) {
-	args := make([][]byte, 0)
-	as := strings.Split(ev.Args, ",")
+func handleArgs(args string) [][]byte {
+	argsBytes := make([][]byte, 0)
+	as := strings.Split(args, ",")
 	for _, a := range as {
-		args = append(args, []byte(a))
+		argsBytes = append(argsBytes, []byte(a))
 	}
+	return argsBytes
+}
+
+func encryptPayload(ev *BrokerThrowEvent) ([]byte, error) {
+	funcs := strings.Split(ev.Funcs, ",")
+	if len(funcs) != 3 {
+		return nil, fmt.Errorf("expected 3 functions, cur: %s", ev.Funcs)
+	}
+
 	content := &pb.Content{
 		SrcContractId: ev.Fid.String(),
 		DstContractId: ev.Tid,
-		Func:          ev.Func,
-		Args:          args,
-		Callback:      ev.Callback,
+		Func:          funcs[0],
+		Args:          handleArgs(ev.Args),
+		Callback:      funcs[1],
+		ArgsCb:        handleArgs(ev.Args),
+		Rollback:      funcs[2],
+		ArgsRb:        handleArgs(ev.Args),
 	}
 	data, err := content.Marshal()
 	if err != nil {
