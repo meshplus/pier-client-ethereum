@@ -1,5 +1,5 @@
-[Ether]
-addr = "ws://host.docker.internal:8546"
+[ether]
+addr = "wss://kovan.infura.io/ws/v3/cc512c8c74c94938aef1c833e1b50b9a"
 name = "ether"
 contract_address = "0xD3880ea40670eD51C3e3C0ea089fDbDc9e3FBBb4"
 abi_path = "broker.abi"
