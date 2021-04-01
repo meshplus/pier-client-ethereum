@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 pragma solidity >=0.5.6;
 
 contract Transfer {
@@ -11,6 +12,15 @@ contract Transfer {
     modifier onlyBroker {
         require(msg.sender == BrokerAddr, "Invoker are not the Broker");
         _;
+    }
+
+    function setBroker(address newBroker) public {
+        BrokerAddr = newBroker;
+        broker = Broker(newBroker);
+    }
+
+    function getBroker() public view returns(address) {
+        return BrokerAddr;
     }
 
     // 资产类的业务合约
@@ -98,6 +108,6 @@ contract Transfer {
     }
 }
 
-contract Broker {
-    function InterchainTransferInvoke(address destChainID, string memory destAddr, string memory args) public returns (bool);
+abstract contract Broker {
+    function InterchainTransferInvoke(address destChainID, string memory destAddr, string memory args) virtual public returns (bool);
 }
