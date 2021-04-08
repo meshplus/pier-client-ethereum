@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -61,38 +60,4 @@ func encryptPayload(ev *BrokerThrowEvent) ([]byte, error) {
 		Content: data,
 	}
 	return ibtppd.Marshal()
-}
-
-func generateExtra(args string, typ pb.IBTP_Type) ([]byte, error) {
-	as := strings.Split(args, ",")
-
-	if typ == pb.IBTP_ASSET_EXCHANGE_INIT {
-		if len(as) != 8 {
-			return nil, fmt.Errorf("incorrect args count for asset exchange init")
-		}
-
-		assetOnSrc, err := strconv.ParseUint(as[4], 10, 64)
-		if err != nil {
-			return nil, err
-		}
-
-		assetOnDst, err := strconv.ParseUint(as[7], 10, 64)
-		if err != nil {
-			return nil, err
-		}
-
-		aei := &pb.AssetExchangeInfo{
-			Id:            as[1],
-			SenderOnSrc:   as[2],
-			ReceiverOnSrc: as[3],
-			AssetOnSrc:    assetOnSrc,
-			SenderOnDst:   as[4],
-			ReceiverOnDst: as[5],
-			AssetOnDst:    assetOnDst,
-		}
-
-		return aei.Marshal()
-	}
-
-	return nil, nil
 }
