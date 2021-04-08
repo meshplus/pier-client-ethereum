@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bitxhub/bitxid"
 	"github.com/cloudflare/cfssl/log"
 	"github.com/meshplus/bitxhub-model/pb"
+	"github.com/meshplus/bitxid"
 )
 
 func Convert2IBTP(ev *BrokerThrowEvent, srcMethod string, ibtpType pb.IBTP_Type) *pb.IBTP {
@@ -19,7 +19,7 @@ func Convert2IBTP(ev *BrokerThrowEvent, srcMethod string, ibtpType pb.IBTP_Type)
 
 	return &pb.IBTP{
 		From:      srcMethod,
-		To:        bitxid.DID(ev.DestDID).GetMethod(),
+		To:        string(bitxid.DID(ev.DestDID).GetChainDID()),
 		Index:     ev.Index,
 		Type:      ibtpType,
 		Timestamp: time.Now().UnixNano(),

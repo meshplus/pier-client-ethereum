@@ -14,7 +14,6 @@ import (
 
 	"github.com/Rican7/retry"
 	"github.com/Rican7/retry/strategy"
-	"github.com/bitxhub/bitxid"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
@@ -26,6 +25,7 @@ import (
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/go-plugin"
 	"github.com/meshplus/bitxhub-model/pb"
+	"github.com/meshplus/bitxid"
 	"github.com/meshplus/pier-client-ethereum/solidity"
 	"github.com/meshplus/pier/pkg/plugins"
 )
@@ -40,7 +40,7 @@ type Client struct {
 	session    *BrokerSession
 	conn       *rpc.Client
 	eventC     chan *pb.IBTP
-	selfMethod string // the method of connected appchain like did:bitxhub:appchain:.
+	appchainID string // the method of connected appchain like did:bitxhub:appchain:.
 	bizABI     map[string]*abi.ABI
 }
 
@@ -56,7 +56,7 @@ var (
 
 const InvokeInterchain = "invokeInterchain"
 
-func (c *Client) Initialize(configPath string, selfMethod string, extra []byte) error {
+func (c *Client) Initialize(configPath string, appchainID string, extra []byte) error {
 	cfg, err := UnmarshalConfig(configPath)
 	if err != nil {
 		return fmt.Errorf("unmarshal config for plugin :%w", err)
@@ -133,7 +133,7 @@ func (c *Client) Initialize(configPath string, selfMethod string, extra []byte) 
 	c.session = session
 	c.abi = ab
 	c.conn = conn
-	c.selfMethod = selfMethod
+	c.appchainID = appchainID
 	c.ctx = context.Background()
 	c.bizABI = bizAbi
 
@@ -344,28 +344,28 @@ func (c *Client) GetOutMessage(to string, idx uint64) (*pb.IBTP, error) {
 
 	for throwEvents.Next() {
 		ev := throwEvents.Event
-		if bitxid.DID(ev.DestDID).GetMethod() == to && ev.Index == idx {
-			return Convert2IBTP(ev, c.selfMethod, pb.IBTP_INTERCHAIN), nil
+		if string(bitxid.DID(ev.DestDID).GetChainDID()) == to && ev.Index == idx {
+			return Convert2IBTP(ev, c.appchainID, pb.IBTP_INTERCHAIN), nil
 		}
 	}
 
 	return nil, fmt.Errorf("cannot find out ibtp for to %s and index %d", to, idx)
 }
 
-func (c *Client) getMeta(method func() ([]string, []uint64, error)) (map[string]uint64, error) {
+func (c *Client) getMeta(getMetaFunc func() ([]string, []uint64, error)) (map[string]uint64, error) {
 	var (
-		didMethods []string
-		indices    []uint64
-		err        error
+		appchainIDs []string
+		indices     []uint64
+		err         error
 	)
 	meta := make(map[string]uint64, 0)
 
-	didMethods, indices, err = method()
+	appchainIDs, indices, err = getMetaFunc()
 	if err != nil {
 		return nil, err
 	}
 
-	for i, did := range didMethods {
+	for i, did := range appchainIDs {
 		meta[did] = indices[i]
 	}
 
@@ -417,6 +417,9 @@ func (c *Client) getBestBlock() uint64 {
 	if err := retry.Retry(func(attempt uint) error {
 		var err error
 		blockNum, err = c.ethClient.BlockNumber(c.ctx)
+		if err != nil {
+			logger.Error("retry failed in getting best block", "err", err.Error())
+		}
 		return err
 	}, strategy.Wait(time.Second*10)); err != nil {
 		logger.Error("retry failed in get best block", "err", err.Error())
