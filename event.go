@@ -47,9 +47,9 @@ func encryptPayload(ev *BrokerThrowEvent) ([]byte, error) {
 		Func:          funcs[0],
 		Args:          handleArgs(ev.Args),
 		Callback:      funcs[1],
-		ArgsCb:        handleArgs(ev.Args),
+		ArgsCb:        handleArgs(ev.Argscb),
 		Rollback:      funcs[2],
-		ArgsRb:        handleArgs(ev.Args),
+		ArgsRb:        handleArgs(ev.Argsrb),
 	}
 	data, err := content.Marshal()
 	if err != nil {
