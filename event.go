@@ -7,17 +7,18 @@ import (
 
 	"github.com/cloudflare/cfssl/log"
 	"github.com/meshplus/bitxhub-model/pb"
+	"github.com/meshplus/bitxid"
 )
 
-func Convert2IBTP(ev *BrokerThrowEvent, from string, ibtpType pb.IBTP_Type) *pb.IBTP {
+func Convert2IBTP(ev *BrokerThrowEvent, srcMethod string, ibtpType pb.IBTP_Type) *pb.IBTP {
 	pd, err := encryptPayload(ev)
 	if err != nil {
 		log.Fatalf("Get ibtp payload :%s", err)
 	}
 
 	return &pb.IBTP{
-		From:      from,
-		To:        ev.To.String(),
+		From:      srcMethod,
+		To:        string(bitxid.DID(ev.DestDID).GetChainDID()),
 		Index:     ev.Index,
 		Type:      ibtpType,
 		Timestamp: time.Now().UnixNano(),
@@ -43,7 +44,7 @@ func encryptPayload(ev *BrokerThrowEvent) ([]byte, error) {
 
 	content := &pb.Content{
 		SrcContractId: ev.Fid.String(),
-		DstContractId: ev.Tid,
+		DstContractId: bitxid.DID(ev.DestDID).GetAddress(),
 		Func:          funcs[0],
 		Args:          handleArgs(ev.Args),
 		Callback:      funcs[1],
