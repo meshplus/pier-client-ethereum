@@ -7,6 +7,7 @@ import (
 )
 
 func (c *Client) StartConsumer() error {
+
 	loop := func(ch chan *BrokerThrowEvent) {
 		for {
 			select {

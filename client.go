@@ -40,8 +40,10 @@ type Client struct {
 	session    *BrokerSession
 	conn       *rpc.Client
 	eventC     chan *pb.IBTP
+	metaC      chan interface{}
 	appchainID string // the method of connected appchain like did:bitxhub:appchain:.
 	bizABI     map[string]*abi.ABI
+	headerPool *headerPool
 }
 
 var (
@@ -51,10 +53,15 @@ var (
 		Output: os.Stderr,
 		Level:  hclog.Trace,
 	})
-	EtherType = "ethereum"
 )
 
-const InvokeInterchain = "invokeInterchain"
+const (
+	EtherType        = "ethereum"
+	InvokeInterchain = "invokeInterchain"
+	rinkebyURL       = "https://rinkeby.infura.io/v3/cc512c8c74c94938aef1c833e1b50b9a"
+	EtherDB          = "eth_rinkeby"
+	Threshold        = 20
+)
 
 func (c *Client) Initialize(configPath string, appchainID string, extra []byte) error {
 	cfg, err := UnmarshalConfig(configPath)
@@ -70,6 +77,19 @@ func (c *Client) Initialize(configPath string, appchainID string, extra []byte) 
 	if err != nil {
 		return fmt.Errorf("dial ethereum node: %w", err)
 	}
+
+	//appchainBlockHeaderPath := filepath.Join(configPath, EtherDB)
+	//db, err := leveldb.New(appchainBlockHeaderPath, 256, 0, "", false)
+	//if err != nil {
+	//	return err
+	//}
+	//database := rawdb.NewDatabase(db)
+	//core.DefaultRinkebyGenesisBlock().MustCommit(database)
+	//lc, err := light.NewLightChain(les.NewLesOdr(database, light.DefaultServerIndexerConfig, nil, nil),
+	//	core.DefaultRinkebyGenesisBlock().Config, clique.New(params.RinkebyChainConfig.Clique, database), params.RinkebyTrustedCheckpoint)
+	//if err != nil {
+	//	return err
+	//}
 
 	keyPath := filepath.Join(configPath, cfg.Ether.KeyPath)
 	keyByte, err := ioutil.ReadFile(keyPath)
@@ -128,6 +148,7 @@ func (c *Client) Initialize(configPath string, appchainID string, extra []byte) 
 
 	c.config = cfg
 	c.eventC = make(chan *pb.IBTP, 1024)
+	//c.metaC = make(chan model.UpdatedMeta, 1024)
 	c.ethClient = etherCli
 	c.broker = broker
 	c.session = session
@@ -141,6 +162,8 @@ func (c *Client) Initialize(configPath string, appchainID string, extra []byte) 
 }
 
 func (c *Client) Start() error {
+	go c.listenHeader()
+	go c.postHeaders()
 	return c.StartConsumer()
 }
 
@@ -159,6 +182,14 @@ func (c *Client) Type() string {
 func (c *Client) GetIBTP() chan *pb.IBTP {
 	return c.eventC
 }
+
+func (c *Client) GetMetaUpdate() <-chan interface{} {
+	return c.metaC
+}
+
+//func (c *Client) GetUpdateMeta() <-chan model.UpdatedMeta {
+//	return c.metaC
+//}
 
 // SubmitIBTP submit interchain ibtp. It will unwrap the ibtp and execute
 // the function inside the ibtp. If any execution results returned, pass

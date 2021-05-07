@@ -13,4 +13,5 @@ require (
 	github.com/meshplus/pier v1.7.1-0.20210524093640-1337e0a53318
 	github.com/pkg/errors v0.9.1
 	github.com/spf13/viper v1.7.0
+	github.com/stretchr/testify v1.7.0
 )
