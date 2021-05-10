@@ -34,12 +34,12 @@ contract DataSwapper {
     }
 }
 
-abstract contract Broker {
+contract Broker {
     function emitInterchainEvent(
         address destChainID,
         string memory destAddr,
         string memory funcs,
         string memory args,
         string memory argscb,
-        string memory argsrb) virtual public;
+        string memory argsrb) public;
 }
