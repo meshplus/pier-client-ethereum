@@ -22,6 +22,7 @@ contract Escrows is AccessControl {
     mapping(bytes32 => EnumerableSet.AddressSet) addrsSet;
 
     bytes32 public constant RELAYER_ROLE = "RELAYER_ROLE"; //0x52454c415945525f524f4c450000000000000000000000000000000000000000
+    bytes32 public constant PIER_ROLE = "PIER_ROLE";
 
     event Lock(
         address ethToken,
@@ -140,7 +141,7 @@ contract Escrows is AccessControl {
     }
 
     modifier onlyCrosser {
-        require(hasRole(RELAYER_ROLE, msg.sender), "caller is not crosser");
+        require(hasRole(PIER_ROLE, msg.sender), "caller is not crosser");
         _;
     }
 

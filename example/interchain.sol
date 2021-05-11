@@ -24,6 +24,7 @@ contract InterchainSwap is AccessControl {
     mapping(bytes32 => EnumerableSet.AddressSet) addrsSet;
 
     bytes32 public constant RELAYER_ROLE = "RELAYER_ROLE"; //0x52454c415945525f524f4c450000000000000000000000000000000000000000
+    bytes32 public constant PIER_ROLE = "PIER_ROLE";
 
     event Burn(
         address ethToken,
@@ -102,31 +103,9 @@ contract InterchainSwap is AccessControl {
         address from,
         address recipient,
         uint256 amount,
-        string memory _txid,
-        bytes[] memory signatures
+        string memory _txid
     ) public onlySupportToken(ethToken) onlyCrosser whenNotUnlocked(_txid) {
         require(eth2bxhToken[ethToken] == bxh2ethToken[relayToken], "Burn::Not Support Token");
-
-        uint N = getRoleMemberCount(RELAYER_ROLE);
-        uint f = (N -1)/3;
-        uint threshold = (N + f + 2) / 2;
-        if (signatures.length < threshold) {
-            return;
-        }
-        bytes32 hash = keccak256(
-            abi.encodePacked(ethToken,relayToken, from, recipient, amount, _txid)
-        );
-
-        for (uint256 i; i < signatures.length; i++) {
-            address relayer = ECDSA.recover(ECDSA.toEthSignedMessageHash(hash), signatures[i]);
-            if (hasRole(RELAYER_ROLE, relayer)) {
-                EnumerableSet.add(addrsSet[hash], relayer);
-            }
-        }
-
-        if (EnumerableSet.length(addrsSet[hash]) < threshold) {
-            revert("signatures invalid");
-        }
 
         txUnlocked[_txid] = true;
         mintAmount[relayToken][recipient] = mintAmount[relayToken][recipient].add(amount);
@@ -145,7 +124,7 @@ contract InterchainSwap is AccessControl {
     }
 
     modifier onlyCrosser {
-        require(hasRole(RELAYER_ROLE, msg.sender), "caller is not crosser");
+        require(hasRole(PIER_ROLE, msg.sender), "caller is not crosser");
         _;
     }
 
