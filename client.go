@@ -473,21 +473,17 @@ func (c *Client) waitForConfirmed(hash common.Hash) *types.Receipt {
 }
 
 func (c *Client) GetReceipt(ibtp *pb.IBTP) (*pb.IBTP, error) {
-	blockBytes, err := c.GetInMessage(ibtp.From, ibtp.Index)
+	block, err := c.getIBTPBlock(ibtp.From, ibtp.Index)
 	if err != nil {
 		return nil, err
 	}
 
-	if len(blockBytes) != 1 {
-		return nil, fmt.Errorf("GetInMessage can not get block number ")
-	}
-
-	blockNum := &big.Int{}
-	blockNum.SetBytes(blockBytes[0])
-
-	block, err := c.ethClient.BlockByNumber(c.ctx, blockNum)
-	if err != nil {
-		return nil, err
+	lastBlock := big.NewInt(int64(c.config.Ether.BeginBlock))
+	if ibtp.Index > 1 {
+		lastBlock, err = c.getIBTPBlock(ibtp.From, ibtp.Index-1)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	pl := &pb.Payload{}
@@ -509,23 +505,30 @@ func (c *Client) GetReceipt(ibtp *pb.IBTP) (*pb.IBTP, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, tx := range block.Transactions() {
-		if tx.To().String() == c.config.Ether.ContractAddress && bytes.Equal(packData, tx.Data()) {
-			receipt := c.getTxReceipt(tx.Hash())
-			if len(receipt.Logs) == 0 || receipt.Status == types.ReceiptStatusFailed {
-				return c.generateCallback(ibtp, nil, false)
-			}
 
-			log := receipt.Logs[len(receipt.Logs)-1]
-			status, result, err := solidity.Unpack(*bAbi, ct.Func, log.Data)
-			if err != nil {
-				return nil, fmt.Errorf("unpack log data %s for func %s", hexutil.Encode(log.Data), ct.Func)
+	for blockNum := block; blockNum.Cmp(lastBlock) == 1; blockNum.Sub(blockNum, big.NewInt(1)) {
+		block, err := c.ethClient.BlockByNumber(c.ctx, blockNum)
+		if err != nil {
+			return nil, err
+		}
+		for _, tx := range block.Transactions() {
+			if tx.To().String() == c.config.Ether.ContractAddress && bytes.Equal(packData, tx.Data()) {
+				receipt := c.getTxReceipt(tx.Hash())
+				if len(receipt.Logs) == 0 || receipt.Status == types.ReceiptStatusFailed {
+					return c.generateCallback(ibtp, nil, false)
+				}
+
+				log := receipt.Logs[len(receipt.Logs)-1]
+				status, result, err := solidity.Unpack(*bAbi, ct.Func, log.Data)
+				if err != nil {
+					return nil, fmt.Errorf("unpack log data %s for func %s", hexutil.Encode(log.Data), ct.Func)
+				}
+				return c.generateCallback(ibtp, result, status)
 			}
-			return c.generateCallback(ibtp, result, status)
 		}
 	}
 
-	return nil, fmt.Errorf("cannot find tx in block %s", blockNum.String())
+	return nil, fmt.Errorf("cannot find tx in blocks (%s, %s]", lastBlock.String(), block.String())
 }
 
 func (c *Client) packFuncArgs(function string, args [][]byte, abi *abi.ABI) ([]byte, error) {
@@ -545,6 +548,22 @@ func (c *Client) packFuncArgs(function string, args [][]byte, abi *abi.ABI) ([]b
 	}
 
 	return packed, nil
+}
+
+func (c *Client) getIBTPBlock(from string, index uint64) (*big.Int, error) {
+	blockBytes, err := c.GetInMessage(from, index)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(blockBytes) != 1 {
+		return nil, fmt.Errorf("GetInMessage can not get block number for IBTP from %s index %d", from, index)
+	}
+
+	blockNum := &big.Int{}
+	blockNum.SetBytes(blockBytes[0])
+
+	return blockNum, nil
 }
 
 func main() {

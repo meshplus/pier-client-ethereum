@@ -23,6 +23,7 @@ type Ether struct {
 	KeyPath         string `mapstructure:"key_path" json:"key_path"`
 	Password        string `toml:"password" json:"password"`
 	MinConfirm      uint64 `mapstructure:"min_confirm" json:"min_confirm"`
+	BeginBlock      uint64 `mapstructure:"begin_block" json:"begin_block"`
 }
 
 func defaultConfig() *Config {
@@ -34,6 +35,7 @@ func defaultConfig() *Config {
 			KeyPath:         "account.key",
 			Password:        "",
 			MinConfirm:      5,
+			BeginBlock:      1,
 		},
 	}
 }
