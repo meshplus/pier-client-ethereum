@@ -525,7 +525,8 @@ func (c *Client) GetReceipt(ibtp *pb.IBTP) (*pb.IBTP, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("cannot find tx in block %s", blockNum.String())
+	// if no receipt is found, means the block is record by invokeIndexUpdateWithError, the tx is failed
+	return c.generateCallback(ibtp, nil, false)
 }
 
 func (c *Client) packFuncArgs(function string, args [][]byte, abi *abi.ABI) ([]byte, error) {
