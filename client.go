@@ -410,6 +410,66 @@ func (c *Client) CommitCallback(ibtp *pb.IBTP) error {
 	return nil
 }
 
+// @ibtp is the original ibtp merged from this appchain
+func (c *Client) RollbackIBTP(ibtp *pb.IBTP, isSrcChain bool) (*pb.RollbackIBTPResponse, error) {
+	ret := &pb.RollbackIBTPResponse{}
+	pd := &pb.Payload{}
+	if err := pd.Unmarshal(ibtp.Payload); err != nil {
+		return nil, fmt.Errorf("ibtp payload unmarshal: %w", err)
+	}
+	content := &pb.Content{}
+	if err := content.Unmarshal(pd.Content); err != nil {
+		return ret, fmt.Errorf("ibtp content unmarshal: %w", err)
+	}
+
+	// only support rollback for interchainCharge
+	if content.Func != "interchainCharge" {
+		return nil, nil
+	}
+
+	var bizData []byte
+	var err error
+	bAbi, ok := c.bizABI[strings.ToLower(content.SrcContractId)]
+	if !ok {
+		ret.Message = fmt.Sprintf("no abi for contract %s", content.SrcContractId)
+	} else {
+		bizData, err = c.packFuncArgs(content.Rollback, content.ArgsRb, bAbi)
+		if err != nil {
+			ret.Message = fmt.Sprintf("pack for ibtp %s func %s and args: %s", ibtp.ID(), content.Func, err)
+		}
+	}
+
+	// false indicates it is for rollback
+	tx, err := c.session.InvokeInterchain(common.HexToAddress(ibtp.To), ibtp.Index, common.HexToAddress(content.SrcContractId), false, bizData)
+	if err != nil {
+		return nil, err
+	}
+	receipt := c.waitForConfirmed(tx.Hash())
+	if len(receipt.Logs) == 0 {
+		ret.Status = false
+		ret.Message = "wrong contract doesn't emit log event"
+	}
+
+	return ret, nil
+}
+
+func (c *Client) IncreaseInMeta(original *pb.IBTP) (*pb.IBTP, error) {
+	ibtp, err := c.generateCallback(original, nil, false)
+	if err != nil {
+		return nil, err
+	}
+	errMsg := "ibtp failed in bitxhub"
+	success, err := c.InvokeIndexUpdateWithError(original.From, original.Index, original.Category(), errMsg)
+	if err != nil {
+		logger.Error(errMsg, "ibtp_id", ibtp.ID(), "error", err.Error())
+		return nil, err
+	}
+	if !success {
+		logger.Error("invalid index of ibtp", "ibtp_id", ibtp.ID())
+	}
+	return ibtp, nil
+}
+
 func (c *Client) getBestBlock() uint64 {
 	var blockNum uint64
 
@@ -457,6 +517,7 @@ func (c *Client) waitForConfirmed(hash common.Hash) *types.Receipt {
 	if err := retry.Retry(func(attempt uint) error {
 		receipt, err = c.ethClient.TransactionReceipt(c.ctx, hash)
 		if err != nil {
+			logger.Error("Get transaction receipt", "error", err.Error(), "hash", hash.String())
 			return err
 		}
 
@@ -521,7 +582,7 @@ func (c *Client) GetReceipt(ibtp *pb.IBTP) (*pb.IBTP, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("cannot find tx in block %s", blockNum.String())
+	return c.generateCallback(ibtp, nil, false)
 }
 
 func (c *Client) packFuncArgs(function string, args [][]byte, abi *abi.ABI) ([]byte, error) {
