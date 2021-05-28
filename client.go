@@ -24,6 +24,7 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/go-plugin"
+	contracts "github.com/meshplus/bitxhub-core/eth-contracts"
 	"github.com/meshplus/bitxhub-model/pb"
 	"github.com/meshplus/bitxid"
 	"github.com/meshplus/pier-client-ethereum/solidity"
@@ -31,36 +32,45 @@ import (
 )
 
 //go:generate abigen --sol ./example/broker.sol --pkg main --out broker.go
+//go:generate abigen --sol ./example/interchain.sol --pkg main --out interchain.go
+//go:generate abigen --sol ./example/escrows.sol --pkg main --out escrows.go
 type Client struct {
-	abi        abi.ABI
-	config     *Config
-	ctx        context.Context
-	ethClient  *ethclient.Client
-	broker     *Broker
-	session    *BrokerSession
-	conn       *rpc.Client
-	eventC     chan *pb.IBTP
-	metaC      chan interface{}
-	appchainID string // the method of connected appchain like did:bitxhub:appchain:.
-	bizABI     map[string]*abi.ABI
-	headerPool *headerPool
+	abi            abi.ABI
+	config         *Config
+	ctx            context.Context
+	ethClient      *ethclient.Client
+	broker         *Broker
+	brokerSession  *BrokerSession
+	escrowsSession *contracts.EscrowsSession
+	conn           *rpc.Client
+	eventC         chan *pb.IBTP
+	metaC          chan *pb.UpdateMeta
+	filterOptCh    chan *bind.FilterOpts
+	logCh          chan *types.Log
+	lockCh         chan *pb.LockEvent
+	appchainID     string // the method of connected appchain like did:bitxhub:appchain:.
+	bizABI         map[string]*abi.ABI
+	headerPool     *headerPool
 }
-
-var (
-	_      plugins.Client = (*Client)(nil)
-	logger                = hclog.New(&hclog.LoggerOptions{
-		Name:   "client",
-		Output: os.Stderr,
-		Level:  hclog.Trace,
-	})
-)
 
 const (
 	EtherType        = "ethereum"
 	InvokeInterchain = "invokeInterchain"
-	rinkebyURL       = "https://rinkeby.infura.io/v3/cc512c8c74c94938aef1c833e1b50b9a"
-	EtherDB          = "eth_rinkeby"
 	Threshold        = 20
+	MintEventName    = "Mint"
+)
+
+var (
+	_ plugins.Client = (*Client)(nil)
+
+	eventSig = map[string]string{
+		"0x4feaa67f2bfe27f3f037662df125ebe5bbba60fe4cbab27b0fc61b13c44789f8": MintEventName,
+	}
+	logger = hclog.New(&hclog.LoggerOptions{
+		Name:   "client",
+		Output: os.Stderr,
+		Level:  hclog.Trace,
+	})
 )
 
 func (c *Client) Initialize(configPath string, appchainID string, extra []byte) error {
@@ -73,23 +83,14 @@ func (c *Client) Initialize(configPath string, appchainID string, extra []byte) 
 		"broker address", cfg.Ether.ContractAddress,
 		"ethereum node ip", cfg.Ether.Addr)
 
+	currentHeight, err := strconv.ParseUint(string(extra), 10, 64)
+	if err != nil {
+		return fmt.Errorf("parse current height from extra: %w", err)
+	}
 	etherCli, err := ethclient.Dial(cfg.Ether.Addr)
 	if err != nil {
 		return fmt.Errorf("dial ethereum node: %w", err)
 	}
-
-	//appchainBlockHeaderPath := filepath.Join(configPath, EtherDB)
-	//db, err := leveldb.New(appchainBlockHeaderPath, 256, 0, "", false)
-	//if err != nil {
-	//	return err
-	//}
-	//database := rawdb.NewDatabase(db)
-	//core.DefaultRinkebyGenesisBlock().MustCommit(database)
-	//lc, err := light.NewLightChain(les.NewLesOdr(database, light.DefaultServerIndexerConfig, nil, nil),
-	//	core.DefaultRinkebyGenesisBlock().Config, clique.New(params.RinkebyChainConfig.Clique, database), params.RinkebyTrustedCheckpoint)
-	//if err != nil {
-	//	return err
-	//}
 
 	keyPath := filepath.Join(configPath, cfg.Ether.KeyPath)
 	keyByte, err := ioutil.ReadFile(keyPath)
@@ -114,13 +115,25 @@ func (c *Client) Initialize(configPath string, appchainID string, extra []byte) 
 	if err != nil {
 		return fmt.Errorf("failed to instantiate a Broker contract: %w", err)
 	}
-	session := &BrokerSession{
+	brokerSession := &BrokerSession{
 		Contract: broker,
 		CallOpts: bind.CallOpts{
 			Pending: false,
 		},
 		TransactOpts: *auth,
 	}
+	escrowsContract, err := contracts.NewEscrows(common.HexToAddress(cfg.Ether.ContractAddress), etherCli)
+	if err != nil {
+		return fmt.Errorf("failed to instantiate a Broker contract: %w", err)
+	}
+	escrowsSession := &contracts.EscrowsSession{
+		Contract: escrowsContract,
+		CallOpts: bind.CallOpts{
+			Pending: false,
+		},
+		TransactOpts: *auth,
+	}
+	c.headerPool = newHeaderPool(currentHeight)
 
 	ab, err := abi.JSON(bytes.NewReader([]byte(BrokerABI)))
 	if err != nil {
@@ -148,10 +161,14 @@ func (c *Client) Initialize(configPath string, appchainID string, extra []byte) 
 
 	c.config = cfg
 	c.eventC = make(chan *pb.IBTP, 1024)
-	//c.metaC = make(chan model.UpdatedMeta, 1024)
+	c.metaC = make(chan *pb.UpdateMeta, 1024)
+	c.filterOptCh = make(chan *bind.FilterOpts, 1024)
+	c.logCh = make(chan *types.Log, 1024)
+	c.lockCh = make(chan *pb.LockEvent, 1024)
 	c.ethClient = etherCli
 	c.broker = broker
-	c.session = session
+	c.brokerSession = brokerSession
+	c.escrowsSession = escrowsSession
 	c.abi = ab
 	c.conn = conn
 	c.appchainID = appchainID
@@ -164,6 +181,7 @@ func (c *Client) Initialize(configPath string, appchainID string, extra []byte) 
 func (c *Client) Start() error {
 	go c.listenHeader()
 	go c.postHeaders()
+	go c.listenLock()
 	return c.StartConsumer()
 }
 
@@ -183,13 +201,18 @@ func (c *Client) GetIBTP() chan *pb.IBTP {
 	return c.eventC
 }
 
-func (c *Client) GetMetaUpdate() <-chan interface{} {
+func (c *Client) GetUpdateMeta() <-chan *pb.UpdateMeta {
 	return c.metaC
 }
 
-//func (c *Client) GetUpdateMeta() <-chan model.UpdatedMeta {
-//	return c.metaC
-//}
+func (c *Client) GetLockEvent() <-chan *pb.LockEvent {
+	return c.lockCh
+}
+
+func (c *Client) Unescrow(unlock *pb.UnLock) error {
+	// todo: implement me
+	return nil
+}
 
 // SubmitIBTP submit interchain ibtp. It will unwrap the ibtp and execute
 // the function inside the ibtp. If any execution results returned, pass
@@ -297,7 +320,7 @@ func (c *Client) InvokeInterchain(srcChainMethod string, index uint64, destAddr 
 	var tx *types.Transaction
 	var txErr error
 	if err := retry.Retry(func(attempt uint) error {
-		tx, txErr = c.session.InvokeInterchain(srcChainMethod, index, common.HexToAddress(destAddr), category == pb.IBTP_REQUEST, bizCallData)
+		tx, txErr = c.brokerSession.InvokeInterchain(srcChainMethod, index, common.HexToAddress(destAddr), category == pb.IBTP_REQUEST, bizCallData)
 		if txErr != nil {
 			logger.Info("Call InvokeInterchain failed",
 				"srcChainMethod", srcChainMethod,
@@ -319,7 +342,7 @@ func (c *Client) InvokeIndexUpdateWithError(srcChainMethod string, index uint64,
 	var tx *types.Transaction
 	var txErr error
 	if err := retry.Retry(func(attempt uint) error {
-		tx, txErr = c.session.InvokeIndexUpdateWithError(srcChainMethod, index, category == pb.IBTP_REQUEST, errMsg)
+		tx, txErr = c.brokerSession.InvokeIndexUpdateWithError(srcChainMethod, index, category == pb.IBTP_REQUEST, errMsg)
 		if txErr != nil {
 			logger.Info("Call InvokeIndexUpdateWithError failed",
 				"srcChainMethod", srcChainMethod,
@@ -347,7 +370,7 @@ func (c *Client) GetOutMessage(to string, idx uint64) (*pb.IBTP, error) {
 	var blockNum *big.Int
 	if err := retry.Retry(func(attempt uint) error {
 		var err error
-		blockNum, err = c.session.GetOutMessage(to, idx)
+		blockNum, err = c.brokerSession.GetOutMessage(to, idx)
 		if err != nil {
 			logger.Error("get out message", "err", err.Error())
 		}
@@ -408,7 +431,7 @@ func (c *Client) GetInMessage(from string, idx uint64) ([][]byte, error) {
 	var blockNum *big.Int
 	if err := retry.Retry(func(attempt uint) error {
 		var err error
-		blockNum, err = c.session.GetInMessage(from, idx)
+		blockNum, err = c.brokerSession.GetInMessage(from, idx)
 		if err != nil {
 			logger.Error("get in message", "err", err.Error())
 		}
@@ -423,19 +446,19 @@ func (c *Client) GetInMessage(from string, idx uint64) ([][]byte, error) {
 // GetInMeta queries contract about how many interchain txs have been
 // executed on this appchain for different source chains.
 func (c *Client) GetInMeta() (map[string]uint64, error) {
-	return c.getMeta(c.session.GetInnerMeta)
+	return c.getMeta(c.brokerSession.GetInnerMeta)
 }
 
 // GetOutMeta queries contract about how many interchain txs have been
 // sent out on this appchain to different destination chains.
 func (c *Client) GetOutMeta() (map[string]uint64, error) {
-	return c.getMeta(c.session.GetOuterMeta)
+	return c.getMeta(c.brokerSession.GetOuterMeta)
 }
 
 // GetCallbackMeta queries contract about how many callback functions have been
 // executed on this appchain from different destination chains.
 func (c *Client) GetCallbackMeta() (map[string]uint64, error) {
-	return c.getMeta(c.session.GetCallbackMeta)
+	return c.getMeta(c.brokerSession.GetCallbackMeta)
 }
 
 func (c *Client) CommitCallback(ibtp *pb.IBTP) error {
@@ -472,7 +495,7 @@ func (c *Client) RollbackIBTP(ibtp *pb.IBTP, isSrcChain bool) (*pb.RollbackIBTPR
 	}
 
 	// false indicates it is for rollback
-	tx, err := c.session.InvokeInterchain(ibtp.To, ibtp.Index, common.HexToAddress(content.SrcContractId), false, bizData)
+	tx, err := c.brokerSession.InvokeInterchain(ibtp.To, ibtp.Index, common.HexToAddress(content.SrcContractId), false, bizData)
 	if err != nil {
 		return nil, err
 	}

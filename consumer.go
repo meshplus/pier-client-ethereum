@@ -20,7 +20,7 @@ func (c *Client) StartConsumer() error {
 	}
 
 	evCh := make(chan *BrokerThrowEvent, 1024)
-	_, err := c.session.Contract.WatchThrowEvent(nil, evCh)
+	_, err := c.brokerSession.Contract.WatchThrowEvent(nil, evCh)
 	if err != nil {
 		return fmt.Errorf("watch event: %s", err)
 	}

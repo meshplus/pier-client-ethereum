@@ -18,18 +18,22 @@ contract Escrows is AccessControl {
 
     mapping(address => address) public supportToken;
     mapping(address => mapping(address => uint256)) public lockAmount;
+    mapping(uint256 => uint256) public index2Height;
     mapping(string => bool) public txUnlocked;
     mapping(bytes32 => EnumerableSet.AddressSet) addrsSet;
+    uint256 public appchainIndex = 0;
+    uint256 public relayIndex = 0;
 
     bytes32 public constant RELAYER_ROLE = "RELAYER_ROLE"; //0x52454c415945525f524f4c450000000000000000000000000000000000000000
-    bytes32 public constant PIER_ROLE = "PIER_ROLE";
+    bytes32 public constant PIER_ROLE = "PIER_ROLE";   //0x504945525f524f4c450000000000000000000000000000000000000000000000
 
     event Lock(
         address ethToken,
         address relayToken,
         address locker,
         address recipient,
-        uint256 amount
+        uint256 amount,
+        uint256 appchainIndex
     );
     event Unlock(
         address ethToken,
@@ -45,7 +49,11 @@ contract Escrows is AccessControl {
         for (uint256 i; i < _relayers.length; i++) {
             _setupRole(RELAYER_ROLE, _relayers[i]);
         }
+    }
 
+    function init() public onlyAdmin {
+        appchainIndex = 0;
+        relayIndex = 0;
     }
 
     function addSupportToken(address ethTokenAddr, address relayTokenAddr) public onlyAdmin {
@@ -86,12 +94,15 @@ contract Escrows is AccessControl {
             amount
         );
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+        appchainIndex = appchainIndex.add(1);
+        index2Height[appchainIndex] = block.number;
         emit Lock(
             token,
             supportToken[token],
             msg.sender,
             recipient,
-            amount
+            amount,
+            appchainIndex
         );
     }
 
@@ -101,11 +112,14 @@ contract Escrows is AccessControl {
         address recipient,
         uint256 amount,
         string memory _txid,
+        uint256 _relayIndex,
         bytes[] memory signatures
     ) public onlySupportToken(token) onlyCrosser whenNotUnlocked(_txid) {
+        if (relayIndex != _relayIndex - 1) {
+            revert("index not match");
+        }
         uint N = getRoleMemberCount(RELAYER_ROLE);
-        uint f = (N -1)/3;
-        uint threshold = (N + f + 2) / 2;
+        uint threshold = (N + (N - 1) / 3 + 2) / 2;
         if (signatures.length < threshold) {
             return;
         }
@@ -114,17 +128,18 @@ contract Escrows is AccessControl {
         );
 
         for (uint256 i; i < signatures.length; i++) {
-            address relayer = ECDSA.recover(ECDSA.toEthSignedMessageHash(hash), signatures[i]);
+            address relayer = recover(ECDSA.toEthSignedMessageHash(hash), signatures[i]);
             if (hasRole(RELAYER_ROLE, relayer)) {
                 EnumerableSet.add(addrsSet[hash], relayer);
             }
         }
 
         if (EnumerableSet.length(addrsSet[hash]) < threshold) {
-            revert("signatures invaild");
+            revert("signatures invalid");
         }
 
         txUnlocked[_txid] = true;
+        relayIndex = relayIndex.add(1);
         lockAmount[token][recipient] = lockAmount[token][recipient].sub(amount);
         IERC20(token).safeTransfer(recipient, amount);
         emit Unlock(token, supportToken[token], from, recipient, amount, _txid);
@@ -148,5 +163,51 @@ contract Escrows is AccessControl {
     modifier whenNotUnlocked(string memory _txid) {
         require(txUnlocked[_txid] == false, "tx unlocked");
         _;
+    }
+
+    function recover(bytes32 hash, bytes memory signature) internal pure returns (address) {
+        // Check the signature length
+        if (signature.length != 65) {
+            //            revert("ECDSA: invalid signature length");
+            return address(0);
+        }
+
+        // Divide the signature in r, s and v variables
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+
+        // ecrecover takes the signature parameters, and the only way to get them
+        // currently is to use assembly.
+        // solhint-disable-next-line no-inline-assembly
+        assembly {
+            r := mload(add(signature, 0x20))
+            s := mload(add(signature, 0x40))
+            v := byte(0, mload(add(signature, 0x60)))
+        }
+        v += 27;
+
+        // EIP-2 still allows signature malleability for ecrecover(). Remove this possibility and make the signature
+        // unique. Appendix F in the Ethereum Yellow paper (https://ethereum.github.io/yellowpaper/paper.pdf), defines
+        // the valid range for s in (281): 0 < s < secp256k1n ÷ 2 + 1, and for v in (282): v ∈ {27, 28}. Most
+        // signatures from current libraries generate a unique signature with an s-value in the lower half order.
+        //
+        // If your library generates malleable signatures, such as s-values in the upper range, calculate a new s-value
+        // with 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141 - s1 and flip v from 27 to 28 or
+        // vice versa. If your library also generates signatures with 0/1 for v instead 27/28, add 27 to v to accept
+        // these malleable signatures as well.
+        if (uint256(s) > 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0) {
+            //            revert("ECDSA: invalid signature 's' value");
+            return address(0);
+        }
+
+        if (v != 27 && v != 28) {
+            //            revert("ECDSA: invalid signature 'v' value");
+            return address(0);
+        }
+
+        // If the signature is valid (and not malleable), return the signer address
+        address signer = ecrecover(hash, v, r, s);
+        return signer;
     }
 }

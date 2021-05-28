@@ -43,6 +43,7 @@ library ECDSA {
             s := mload(add(signature, 0x40))
             v := byte(0, mload(add(signature, 0x60)))
         }
+        v+=27;
 
         // EIP-2 still allows signature malleability for ecrecover(). Remove this possibility and make the signature
         // unique. Appendix F in the Ethereum Yellow paper (https://ethereum.github.io/yellowpaper/paper.pdf), defines

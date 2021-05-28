@@ -20,18 +20,20 @@ contract InterchainSwap is AccessControl {
     mapping(address => address) public eth2bxhToken;
     mapping(address => address) public bxh2ethToken;
     mapping(address => mapping(address => uint256)) public mintAmount;
-    mapping(string => bool) public txUnlocked;
-    mapping(bytes32 => EnumerableSet.AddressSet) addrsSet;
+    mapping(uint256 => uint256) public index2Height;
+    mapping(string => bool) public txMinted;
+    uint256 public appchainIndex = 0;
+    uint256 public relayIndex = 0;
 
-    bytes32 public constant RELAYER_ROLE = "RELAYER_ROLE"; //0x52454c415945525f524f4c450000000000000000000000000000000000000000
-    bytes32 public constant PIER_ROLE = "PIER_ROLE";
+    bytes32 public constant PIER_ROLE = "PIER_ROLE"; //0x504945525f524f4c450000000000000000000000000000000000000000000000
 
     event Burn(
         address ethToken,
         address relayToken,
         address burner,
         address recipient,
-        uint256 amount
+        uint256 amount,
+        uint256 relayIndex
     );
     event Mint(
         address ethToken,
@@ -39,13 +41,14 @@ contract InterchainSwap is AccessControl {
         address from,
         address recipient,
         uint256 amount,
-        string txid
+        string txid,
+        uint256 appchainIndex
     );
 
-    constructor(address[] memory _relayers) public {
+    constructor(address[] memory _piers) public {
         _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        for (uint256 i; i < _relayers.length; i++) {
-            _setupRole(RELAYER_ROLE, _relayers[i]);
+        for (uint256 i; i < _piers.length; i++) {
+            _setupRole(PIER_ROLE, _piers[i]);
         }
     }
 
@@ -89,12 +92,14 @@ contract InterchainSwap is AccessControl {
     }
 
 
-    function burn(address token, uint256 amount, address recipient) public onlySupportToken(token) {
-        mintAmount[token][msg.sender] = mintAmount[token][msg.sender].sub(
+    function burn(address relayToken, uint256 amount, address recipient) public onlySupportToken(bxh2ethToken[relayToken]) {
+        mintAmount[relayToken][msg.sender] = mintAmount[relayToken][msg.sender].sub(
             amount
         );
-        IMintBurn(token).burn(recipient, amount);
-        emit Burn(bxh2ethToken[token], token, msg.sender, recipient, amount);
+        IMintBurn(relayToken).burn(recipient, amount);
+        relayIndex = relayIndex.add(1);
+        index2Height[relayIndex]=block.number;
+        emit Burn(bxh2ethToken[relayToken], relayToken, msg.sender, recipient, amount, relayIndex);
     }
 
     function mint(
@@ -103,14 +108,18 @@ contract InterchainSwap is AccessControl {
         address from,
         address recipient,
         uint256 amount,
-        string memory _txid
-    ) public onlySupportToken(ethToken) onlyCrosser whenNotUnlocked(_txid) {
-        require(eth2bxhToken[ethToken] == bxh2ethToken[relayToken], "Burn::Not Support Token");
-
-        txUnlocked[_txid] = true;
+        string memory _txid,
+        uint256 _appchainIndex
+    ) public onlySupportToken(ethToken) onlyCrosser whenNotMinted(_txid) {
+        require(eth2bxhToken[ethToken] == relayToken, "Burn::Not Support Token");
+        if (appchainIndex != _appchainIndex - 1) {
+            revert("index not match");
+        }
+        txMinted[_txid] = true;
+        appchainIndex = appchainIndex.add(1);
         mintAmount[relayToken][recipient] = mintAmount[relayToken][recipient].add(amount);
         IMintBurn(relayToken).mint(recipient, amount);
-        emit Mint(ethToken, relayToken, from, recipient, amount, _txid);
+        emit Mint(ethToken, relayToken, from, recipient, amount, _txid, appchainIndex);
     }
 
     modifier onlySupportToken(address token) {
@@ -128,8 +137,8 @@ contract InterchainSwap is AccessControl {
         _;
     }
 
-    modifier whenNotUnlocked(string memory _txid) {
-        require(txUnlocked[_txid] == false, "tx unlocked");
+    modifier whenNotMinted(string memory _txid) {
+        require(txMinted[_txid] == false, "tx minted");
         _;
     }
 }
