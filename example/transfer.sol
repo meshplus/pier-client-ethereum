@@ -39,7 +39,7 @@ contract Transfer {
         return true;
     }
 
-    function getBalance(string memory id) public returns(uint64) {
+    function getBalance(string memory id) public view returns(uint64) {
         return accountM[id];
     }
 
