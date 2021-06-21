@@ -20,6 +20,7 @@ type Ether struct {
 	Addr            string `toml:"addr" json:"addr"`
 	Name            string `toml:"name" json:"name"`
 	ContractAddress string `mapstructure:"contract_address" json:"contract_address"`
+	EscrowsAddress  string `mapstructure:"escrows_address" json:"escrows_address"`
 	KeyPath         string `mapstructure:"key_path" json:"key_path"`
 	Password        string `toml:"password" json:"password"`
 	MinConfirm      uint64 `mapstructure:"min_confirm" json:"min_confirm"`
@@ -31,6 +32,7 @@ func defaultConfig() *Config {
 			Addr:            "https://mainnet.infura.io",
 			Name:            "Ethereum",
 			ContractAddress: "0xD3880ea40670eD51C3e3C0ea089fDbDc9e3FBBb4",
+			EscrowsAddress:  "0x956Be099e5Add3d95aaB9D1a7Da5a40eB9d02528",
 			KeyPath:         "account.key",
 			Password:        "",
 			MinConfirm:      5,

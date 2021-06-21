@@ -22,6 +22,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/ethereum/go-ethereum/trie"
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/go-plugin"
 	contracts "github.com/meshplus/bitxhub-core/eth-contracts"
@@ -46,8 +47,9 @@ type Client struct {
 	eventC         chan *pb.IBTP
 	metaC          chan *pb.UpdateMeta
 	filterOptCh    chan *bind.FilterOpts
-	logCh          chan *types.Log
+	logCh          chan *contracts.EscrowsLock
 	lockCh         chan *pb.LockEvent
+	preLockCh      chan *PreLockEvent
 	appchainID     string // the method of connected appchain like did:bitxhub:appchain:.
 	bizABI         map[string]*abi.ABI
 	headerPool     *headerPool
@@ -122,7 +124,7 @@ func (c *Client) Initialize(configPath string, appchainID string, extra []byte) 
 		},
 		TransactOpts: *auth,
 	}
-	escrowsContract, err := contracts.NewEscrows(common.HexToAddress(cfg.Ether.ContractAddress), etherCli)
+	escrowsContract, err := contracts.NewEscrows(common.HexToAddress(cfg.Ether.EscrowsAddress), etherCli)
 	if err != nil {
 		return fmt.Errorf("failed to instantiate a Broker contract: %w", err)
 	}
@@ -163,8 +165,9 @@ func (c *Client) Initialize(configPath string, appchainID string, extra []byte) 
 	c.eventC = make(chan *pb.IBTP, 1024)
 	c.metaC = make(chan *pb.UpdateMeta, 1024)
 	c.filterOptCh = make(chan *bind.FilterOpts, 1024)
-	c.logCh = make(chan *types.Log, 1024)
+	c.logCh = make(chan *contracts.EscrowsLock, 1024)
 	c.lockCh = make(chan *pb.LockEvent, 1024)
+	c.preLockCh = make(chan *PreLockEvent, 1024)
 	c.ethClient = etherCli
 	c.broker = broker
 	c.brokerSession = brokerSession
@@ -182,6 +185,7 @@ func (c *Client) Start() error {
 	go c.listenHeader()
 	go c.postHeaders()
 	go c.listenLock()
+	go c.postLock()
 	return c.StartConsumer()
 }
 
@@ -210,7 +214,22 @@ func (c *Client) GetLockEvent() <-chan *pb.LockEvent {
 }
 
 func (c *Client) Unescrow(unlock *pb.UnLock) error {
-	// todo: implement me
+	logger.Info("unescrow", "trx", "start")
+	_, err := c.escrowsSession.Unlock(
+		common.HexToAddress(unlock.Token),
+		common.HexToAddress(unlock.From),
+		common.HexToAddress(unlock.Receipt),
+		new(big.Int).SetUint64(unlock.Amount),
+		unlock.TxId,
+		new(big.Int).SetUint64(unlock.RelayIndex),
+		unlock.GetMultiSigns())
+	if err != nil {
+		logger.Error("unescrow", "err", err.Error())
+		return nil
+	}
+	//logger.Info("unescrow", "tx-hash", transaction.Hash().Hex())
+	//status := c.getTxReceipt(transaction.Hash()).Status
+	//logger.Info("unescrow", "txReceipt", status)
 	return nil
 }
 
@@ -446,19 +465,19 @@ func (c *Client) GetInMessage(from string, idx uint64) ([][]byte, error) {
 // GetInMeta queries contract about how many interchain txs have been
 // executed on this appchain for different source chains.
 func (c *Client) GetInMeta() (map[string]uint64, error) {
-	return c.getMeta(c.brokerSession.GetInnerMeta)
+	return make(map[string]uint64, 0), nil
 }
 
 // GetOutMeta queries contract about how many interchain txs have been
 // sent out on this appchain to different destination chains.
 func (c *Client) GetOutMeta() (map[string]uint64, error) {
-	return c.getMeta(c.brokerSession.GetOuterMeta)
+	return make(map[string]uint64, 0), nil
 }
 
 // GetCallbackMeta queries contract about how many callback functions have been
 // executed on this appchain from different destination chains.
 func (c *Client) GetCallbackMeta() (map[string]uint64, error) {
-	return c.getMeta(c.brokerSession.GetCallbackMeta)
+	return make(map[string]uint64, 0), nil
 }
 
 func (c *Client) CommitCallback(ibtp *pb.IBTP) error {
@@ -659,6 +678,103 @@ func (c *Client) packFuncArgs(function string, args [][]byte, abi *abi.ABI) ([]b
 	}
 
 	return packed, nil
+}
+
+func (c *Client) QueryFilterLockStart(appchainIndex int64) int64 {
+	res, err := c.escrowsSession.Index2Height(big.NewInt(appchainIndex))
+	if err != nil {
+		return 0
+	}
+	return res.Int64()
+}
+
+func (c *Client) QueryLockEventByIndex(index int64) *pb.LockEvent {
+	var lockCh *pb.LockEvent
+	height, er := c.escrowsSession.Index2Height(big.NewInt(index))
+	if er != nil {
+		return nil
+	}
+	end := height.Uint64()
+	filterOpt := &bind.FilterOpts{
+		Start: end,
+		End:   &end,
+	}
+
+	var (
+		iter *contracts.EscrowsLockIterator
+		err  error
+	)
+	if err := retry.Retry(func(attempt uint) error {
+		iter, err = c.escrowsSession.Contract.FilterLock(filterOpt)
+		if err != nil {
+			return err
+		}
+		return nil
+	}, strategy.Wait(1*time.Second)); err != nil {
+		logger.Error("Can't get filter mint event", "error", err.Error())
+	}
+	for iter.Next() {
+		if index != iter.Event.AppchainIndex.Int64() {
+			continue
+		}
+		raw := &iter.Event.Raw
+		// query this block from ethereum and generate mintEvent and proof for pier
+		if err := retry.Retry(func(attempt uint) error {
+			block, err := c.ethClient.BlockByNumber(c.ctx, big.NewInt(int64(raw.BlockNumber)))
+			if err != nil {
+				return err
+			}
+			receipt, err := c.ethClient.TransactionReceipt(c.ctx, raw.TxHash)
+			if err != nil {
+				return err
+			}
+			// construct receipt merkle tree first for proof generate
+			receipts := make([]*types.Receipt, 0, len(block.Transactions()))
+			for _, tx := range block.Transactions() {
+				receipt, err := c.ethClient.TransactionReceipt(c.ctx, tx.Hash())
+				if err != nil {
+					return err
+				}
+				receipts = append(receipts, receipt)
+			}
+			receiptsTrie := new(trie.Trie)
+			tReceipts := types.Receipts(receipts)
+			types.DeriveSha(tReceipts, receiptsTrie)
+
+			receiptData, err := receipt.MarshalJSON()
+			if err != nil {
+				return err
+			}
+			proof, err := c.getProof(receiptsTrie, uint64(receipt.TransactionIndex))
+			if err != nil {
+				return err
+			}
+			lockCh = &pb.LockEvent{
+				AppchainIndex: iter.Event.AppchainIndex.Uint64(),
+				Receipt:       receiptData,
+				Proof:         proof,
+			}
+			return nil
+		}, strategy.Wait(1*time.Second)); err != nil {
+			logger.Error("Can't retrieve mint event from receipt", "error", err.Error())
+		}
+	}
+	return lockCh
+}
+
+func (c *Client) QueryAppchainIndex() int64 {
+	res, err := c.escrowsSession.AppchainIndex()
+	if err != nil {
+		return 0
+	}
+	return res.Int64()
+}
+func (c *Client) QueryRelayIndex() int64 {
+	res, err := c.escrowsSession.RelayIndex()
+	if err != nil {
+		return 0
+	}
+	return res.Int64()
 }
 
 func main() {

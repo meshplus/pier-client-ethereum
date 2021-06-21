@@ -9,8 +9,8 @@ import "./interface/IMintBurn.sol";
 import "./interface/IPause.sol";
 
 contract BaseToken is ERC20Pausable, AccessControl, IMintBurn, IPause{
-    bytes32 public constant MINTER_ROLE ="MINTER_ROLE";
-    bytes32 public constant BURNER_ROLE ="BURNER_ROLE";
+    bytes32 public constant MINTER_ROLE ="MINTER_ROLE"; //0x4d494e5445525f524f4c45000000000000000000000000000000000000000000
+    bytes32 public constant BURNER_ROLE ="BURNER_ROLE";//0x4255524e45525f524f4c45000000000000000000000000000000000000000000
     bytes32 public constant LIQUIDATION = "LIQUIDATION";
     constructor(
         string memory _name,

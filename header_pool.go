@@ -2,15 +2,16 @@ package main
 
 import (
 	"encoding/json"
-	"github.com/meshplus/bitxhub-model/pb"
 	"math/big"
 	"time"
+
+	"github.com/meshplus/bitxhub-model/pb"
 
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
 const (
-	defaultCap = 20
+	defaultCap = 200
 )
 
 type headerPool struct {
@@ -74,13 +75,13 @@ func (c *Client) listenHeader() {
 				logger.Error("get most recent height", "error", err.Error())
 				continue
 			}
-			for i := c.headerPool.currentNum + 1; i <= latestHeight-Threshold; i++ {
+			for i := c.headerPool.currentNum; i <= latestHeight-Threshold; i++ {
+				c.headerPool.currentNum++
 				header, err := c.ethClient.HeaderByNumber(c.ctx, big.NewInt(int64(c.headerPool.currentNum)))
 				if err != nil {
 					return
 				}
 				c.headerPool.recvHeaderCh <- header
-				c.headerPool.currentNum++
 			}
 		case <-c.ctx.Done():
 			ticker.Stop()
