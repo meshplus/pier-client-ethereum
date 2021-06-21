@@ -96,7 +96,7 @@ contract InterchainSwap is AccessControl {
         mintAmount[relayToken][msg.sender] = mintAmount[relayToken][msg.sender].sub(
             amount
         );
-        IMintBurn(relayToken).burn(recipient, amount);
+        IMintBurn(relayToken).burn(msg.sender, amount);
         relayIndex = relayIndex.add(1);
         index2Height[relayIndex]=block.number;
         emit Burn(bxh2ethToken[relayToken], relayToken, msg.sender, recipient, amount, relayIndex);
