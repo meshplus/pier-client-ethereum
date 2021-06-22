@@ -11,9 +11,7 @@ require (
 	github.com/meshplus/bitxhub-core v1.3.1-0.20210611011450-ca11d623d8cc
 	github.com/meshplus/bitxhub-model v1.2.1-0.20210616124147-a2470bd3d55d
 	github.com/meshplus/bitxid v0.0.0-20210412025850-e0eaf0f9063a
-	github.com/meshplus/pier v1.7.1-0.20210524093640-1337e0a53318
+	github.com/meshplus/pier v1.7.1-0.20210621092402-76c5dd36eda6
 	github.com/pkg/errors v0.9.1
 	github.com/spf13/viper v1.7.0
 )
-
-replace github.com/meshplus/pier => ../pier
