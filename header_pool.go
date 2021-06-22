@@ -27,7 +27,7 @@ func newHeaderPool(currentNum uint64) *headerPool {
 		headersSet:   make([]*types.Header, 0, defaultCap),
 		batchCh:      make(chan []*types.Header, defaultCap),
 		recvHeaderCh: make(chan *types.Header, defaultCap),
-		currentNum:   currentNum - 20,
+		currentNum:   currentNum,
 	}
 }
 
