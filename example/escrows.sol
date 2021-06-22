@@ -140,7 +140,7 @@ contract Escrows is AccessControl {
 
         txUnlocked[_txid] = true;
         relayIndex = relayIndex.add(1);
-        lockAmount[token][recipient] = lockAmount[token][recipient].sub(amount);
+        lockAmount[token][from] = lockAmount[token][from].sub(amount);
         IERC20(token).safeTransfer(recipient, amount);
         emit Unlock(token, supportToken[token], from, recipient, amount, _txid);
     }
