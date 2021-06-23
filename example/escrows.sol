@@ -17,7 +17,7 @@ contract Escrows is AccessControl {
     using EnumerableSet for EnumerableSet.AddressSet;
 
     mapping(address => address) public supportToken;
-    mapping(address => mapping(address => uint256)) public lockAmount;
+    mapping(address => uint256) public lockAmount;
     mapping(uint256 => uint256) public index2Height;
     mapping(string => bool) public txUnlocked;
     mapping(bytes32 => EnumerableSet.AddressSet) addrsSet;
@@ -90,7 +90,7 @@ contract Escrows is AccessControl {
 
 
     function lock(address token, uint256 amount, address recipient) public onlySupportToken(token) {
-        lockAmount[token][msg.sender] = lockAmount[token][msg.sender].add(
+        lockAmount[token] = lockAmount[token].add(
             amount
         );
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
@@ -140,7 +140,7 @@ contract Escrows is AccessControl {
 
         txUnlocked[_txid] = true;
         relayIndex = relayIndex.add(1);
-        lockAmount[token][from] = lockAmount[token][from].sub(amount);
+        lockAmount[token] = lockAmount[token].sub(amount);
         IERC20(token).safeTransfer(recipient, amount);
         emit Unlock(token, supportToken[token], from, recipient, amount, _txid);
     }
