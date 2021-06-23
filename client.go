@@ -225,7 +225,7 @@ func (c *Client) Unescrow(unlock *pb.UnLock) error {
 		unlock.GetMultiSigns())
 	if err != nil {
 		logger.Error("unescrow", "err", err.Error())
-		return nil
+		return err
 	}
 	//logger.Info("unescrow", "tx-hash", transaction.Hash().Hex())
 	//status := c.getTxReceipt(transaction.Hash()).Status
