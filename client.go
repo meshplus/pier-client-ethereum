@@ -214,18 +214,17 @@ func (c *Client) GetLockEvent() <-chan *pb.LockEvent {
 }
 
 func (c *Client) Unescrow(unlock *pb.UnLock) error {
-	logger.Info("unescrow", "trx", "start")
 	_, err := c.escrowsSession.Unlock(
 		common.HexToAddress(unlock.Token),
 		common.HexToAddress(unlock.From),
 		common.HexToAddress(unlock.Receipt),
-		new(big.Int).SetUint64(unlock.Amount),
+		new(big.Int).SetBytes(unlock.Amount),
 		unlock.TxId,
 		new(big.Int).SetUint64(unlock.RelayIndex),
 		unlock.GetMultiSigns())
 	if err != nil {
 		logger.Error("unescrow", "err", err.Error())
-		return nil
+		return err
 	}
 	//logger.Info("unescrow", "tx-hash", transaction.Hash().Hex())
 	//status := c.getTxReceipt(transaction.Hash()).Status

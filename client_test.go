@@ -36,9 +36,9 @@ func TestM(t *testing.T) {
 	//require.Nil(t, err)
 	//fmt.Printf("header 100 is %v\n", header)
 	etherCli, _ := ethclient.Dial("wss://ropsten.infura.io/ws/v3/042b7404d74f4f18bbca771786fed781")
-	block, _ := etherCli.BlockByNumber(context.Background(), big.NewInt(10454593))
+	block, _ := etherCli.BlockByNumber(context.Background(), big.NewInt(10492522))
 	s, _ := json.Marshal(block.Header())
-	fmt.Println(s)
+	fmt.Println(string(s))
 	//
 	//bytes := common.RightPadBytes([]byte("PIER_ROLE"), 32)
 	//fmt.Println(common.Bytes2Hex(bytes))
@@ -194,39 +194,3 @@ func unpackEscrowsLock(receiptData []byte) (*contracts.EscrowsLock, error) {
 	}
 	return lock, nil
 }
-
-//func VerifyProof(receipt *types.Receipt, proof []byte) error {
-//	if receipt.Status == 0 {
-//		return fmt.Errorf("receipt status is fail, hash is:%v", receipt.TxHash.String())
-//	}
-//	header := oracle.GetHeader(receipt.BlockHash)
-//	if header == nil {
-//		return fmt.Errorf("not found header:%v", receipt.BlockHash.String())
-//	}
-//	currentHeader := oracle.CurrentHeader()
-//	if currentHeader.Number.Uint64()-header.Number.Uint64() < MinConfirmNum {
-//		return fmt.Errorf("not enough confirmed")
-//	}
-//
-//	keyBuf := bytes.Buffer{}
-//	keyBuf.Reset()
-//	if err := rlp.Encode(&keyBuf, receipt.TransactionIndex); err != nil {
-//		return err
-//	}
-//	nodeList := &light.NodeList{}
-//	if err := rlp.DecodeBytes(proof, nodeList); err != nil {
-//		return err
-//	}
-//	value, err := trie.VerifyProof(header.ReceiptHash, keyBuf.Bytes(), nodeList.NodeSet())
-//	if err != nil {
-//		return err
-//	}
-//	receiptData, err := rlp.EncodeToBytes(receipt)
-//	if err != nil {
-//		return err
-//	}
-//	if !bytes.Equal(receiptData, value) {
-//		return fmt.Errorf("invaild receipt:%v", receipt.TxHash.String())
-//	}
-//	return nil
-//}
