@@ -40,6 +40,7 @@ func (c *Client) postLock() {
 						AppchainIndex: event.AppchainIndex,
 						Receipt:       event.Receipt,
 						Proof:         event.Proof,
+						BlockNumber:   event.BlockNumber,
 					}
 				} else {
 					// not enough attach current height will redo in preLockCh
