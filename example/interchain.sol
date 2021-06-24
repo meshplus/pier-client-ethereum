@@ -19,7 +19,7 @@ contract InterchainSwap is AccessControl {
 
     mapping(address => address) public eth2bxhToken;
     mapping(address => address) public bxh2ethToken;
-    mapping(address => mapping(address => uint256)) public mintAmount;
+    mapping(address => uint256) public mintAmount;
     mapping(uint256 => uint256) public index2Height;
     mapping(string => bool) public txMinted;
     uint256 public appchainIndex = 0;
@@ -93,7 +93,7 @@ contract InterchainSwap is AccessControl {
 
 
     function burn(address relayToken, uint256 amount, address recipient) public onlySupportToken(bxh2ethToken[relayToken]) {
-        mintAmount[relayToken][msg.sender] = mintAmount[relayToken][msg.sender].sub(
+        mintAmount[relayToken] = mintAmount[relayToken].sub(
             amount
         );
         IMintBurn(relayToken).burn(msg.sender, amount);
@@ -117,7 +117,7 @@ contract InterchainSwap is AccessControl {
         }
         txMinted[_txid] = true;
         appchainIndex = appchainIndex.add(1);
-        mintAmount[relayToken][recipient] = mintAmount[relayToken][recipient].add(amount);
+        mintAmount[relayToken] = mintAmount[relayToken].add(amount);
         IMintBurn(relayToken).mint(recipient, amount);
         emit Mint(ethToken, relayToken, from, recipient, amount, _txid, appchainIndex);
     }
