@@ -52,7 +52,10 @@ func (c *Client) postHeaders() {
 				c.filterLog(batch)
 				c.headerPool.headersSet = make([]*types.Header, 0, defaultCap)
 				data, _ := json.Marshal(batch)
-				c.metaC <- &pb.UpdateMeta{Meta: data}
+				c.metaC <- &pb.UpdateMeta{
+					Meta:      data,
+					EndHeader: batch[len(batch)-1].Number.Uint64(),
+				}
 			}
 		case <-c.ctx.Done():
 			ticker.Stop()

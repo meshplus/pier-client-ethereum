@@ -36,7 +36,7 @@ func TestM(t *testing.T) {
 	//require.Nil(t, err)
 	//fmt.Printf("header 100 is %v\n", header)
 	etherCli, _ := ethclient.Dial("wss://ropsten.infura.io/ws/v3/042b7404d74f4f18bbca771786fed781")
-	block, _ := etherCli.BlockByNumber(context.Background(), big.NewInt(10492522))
+	block, _ := etherCli.BlockByNumber(context.Background(), big.NewInt(10499324))
 	s, _ := json.Marshal(block.Header())
 	fmt.Println(string(s))
 	//
@@ -129,6 +129,8 @@ func TestUnpack(t *testing.T) {
 				return err
 			}
 			lockCh = &pb.LockEvent{
+				//AppchainIndex: event.AppchainIndex,
+				//BlockNumber:   event.BlockNumber,
 				Receipt: receiptData,
 				Proof:   proof,
 			}

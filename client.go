@@ -124,6 +124,7 @@ func (c *Client) Initialize(configPath string, appchainID string, extra []byte) 
 		},
 		TransactOpts: *auth,
 	}
+	logger.Info("unescrow address", "addr", cfg.Ether.EscrowsAddress)
 	escrowsContract, err := contracts.NewEscrows(common.HexToAddress(cfg.Ether.EscrowsAddress), etherCli)
 	if err != nil {
 		return fmt.Errorf("failed to instantiate a Broker contract: %w", err)
@@ -750,6 +751,7 @@ func (c *Client) QueryLockEventByIndex(index int64) *pb.LockEvent {
 			}
 			lockCh = &pb.LockEvent{
 				AppchainIndex: iter.Event.AppchainIndex.Uint64(),
+				BlockNumber:   receipt.BlockNumber.Uint64(),
 				Receipt:       receiptData,
 				Proof:         proof,
 			}
