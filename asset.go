@@ -35,7 +35,7 @@ func (c *Client) postLock() {
 					logger.Warn("preLockEvent handle error")
 					return
 				}
-				if c.headerPool.currentNum-event.BlockNumber > 20 {
+				if c.headerPool.currentNum-event.BlockNumber > 1 {
 					c.lockCh <- &pb.LockEvent{
 						AppchainIndex: event.AppchainIndex,
 						Receipt:       event.Receipt,

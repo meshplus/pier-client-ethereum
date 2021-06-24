@@ -147,7 +147,6 @@ func (c *Client) Initialize(configPath string, appchainID string, extra []byte) 
 		},
 		TransactOpts: *auth,
 	}
-	c.headerPool = newHeaderPool(currentHeight)
 
 	ab, err := abi.JSON(bytes.NewReader([]byte(BrokerABI)))
 	if err != nil {
@@ -188,6 +187,15 @@ func (c *Client) Initialize(configPath string, appchainID string, extra []byte) 
 	c.conn = conn
 	c.appchainID = appchainID
 	c.bizABI = bizAbi
+
+	appchainIndex := c.QueryAppchainIndex()
+	if 0 == appchainIndex {
+		currentHeight, _ = c.ethClient.BlockNumber(c.ctx)
+	} else {
+		currentHeight = big.NewInt(c.QueryFilterLockStart(appchainIndex)).Uint64()
+	}
+
+	c.headerPool = newHeaderPool(currentHeight)
 
 	return nil
 }

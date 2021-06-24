@@ -1,11 +1,8 @@
 package main
 
 import (
-	"encoding/json"
 	"math/big"
 	"time"
-
-	"github.com/meshplus/bitxhub-model/pb"
 
 	"github.com/ethereum/go-ethereum/core/types"
 )
@@ -51,11 +48,11 @@ func (c *Client) postHeaders() {
 				batch := c.headerPool.headersSet
 				c.filterLog(batch)
 				c.headerPool.headersSet = make([]*types.Header, 0, defaultCap)
-				data, _ := json.Marshal(batch)
-				c.metaC <- &pb.UpdateMeta{
-					Meta:      data,
-					EndHeader: batch[len(batch)-1].Number.Uint64(),
-				}
+				//data, _ := json.Marshal(batch)
+				//c.metaC <- &pb.UpdateMeta{
+				//	Meta:      data,
+				//	EndHeader: batch[len(batch)-1].Number.Uint64(),
+				//}
 			}
 		case <-c.ctx.Done():
 			ticker.Stop()
@@ -78,12 +75,9 @@ func (c *Client) listenHeader() {
 				logger.Error("get most recent height", "error", err.Error())
 				continue
 			}
-			for i := c.headerPool.currentNum; i <= latestHeight-Threshold; i++ {
+			for i := c.headerPool.currentNum; i <= latestHeight; i++ {
 				c.headerPool.currentNum++
-				header, err := c.ethClient.HeaderByNumber(c.ctx, big.NewInt(int64(c.headerPool.currentNum)))
-				if err != nil {
-					return
-				}
+				header := &types.Header{Number: new(big.Int).SetUint64(c.headerPool.currentNum)}
 				c.headerPool.recvHeaderCh <- header
 			}
 		case <-c.ctx.Done():
