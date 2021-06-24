@@ -76,6 +76,7 @@ var (
 )
 
 func (c *Client) Initialize(configPath string, appchainID string, extra []byte) error {
+	c.ctx = context.Background()
 	cfg, err := UnmarshalConfig(configPath)
 	if err != nil {
 		return fmt.Errorf("unmarshal config for plugin :%w", err)
@@ -110,9 +111,19 @@ func (c *Client) Initialize(configPath string, appchainID string, extra []byte) 
 	if err != nil {
 		return err
 	}
-
+	chainID, err := etherCli.ChainID(c.ctx)
+	if err != nil {
+		return err
+	}
 	// deploy a contract first
-	auth := bind.NewKeyedTransactor(unlockedKey.PrivateKey)
+	auth, err := bind.NewKeyedTransactorWithChainID(unlockedKey.PrivateKey, chainID)
+	if err != nil {
+		return err
+	}
+	auth.Context = c.ctx
+	//auth.GasFeeCap = big.NewInt(2000)
+	//auth.GasTipCap = big.NewInt(2000)
+	//auth.GasPrice = big.NewInt(2000)
 	broker, err := NewBroker(common.HexToAddress(cfg.Ether.ContractAddress), etherCli)
 	if err != nil {
 		return fmt.Errorf("failed to instantiate a Broker contract: %w", err)
@@ -176,7 +187,6 @@ func (c *Client) Initialize(configPath string, appchainID string, extra []byte) 
 	c.abi = ab
 	c.conn = conn
 	c.appchainID = appchainID
-	c.ctx = context.Background()
 	c.bizABI = bizAbi
 
 	return nil
@@ -187,7 +197,7 @@ func (c *Client) Start() error {
 	go c.postHeaders()
 	go c.listenLock()
 	go c.postLock()
-	return c.StartConsumer()
+	return nil
 }
 
 func (c *Client) Stop() error {
@@ -227,9 +237,17 @@ func (c *Client) Unescrow(unlock *pb.UnLock) error {
 		logger.Error("unescrow", "err", err.Error())
 		return err
 	}
-	//logger.Info("unescrow", "tx-hash", transaction.Hash().Hex())
-	//status := c.getTxReceipt(transaction.Hash()).Status
-	//logger.Info("unescrow", "txReceipt", status)
+	//logger.Debug("unescrow_txhash", "hash", tx.Hash())
+	//
+	//receipt, err := c.ethClient.TransactionReceipt(c.ctx, tx.Hash())
+	//if err != nil {
+	//	logger.Error("unescrow2", "err", err.Error())
+	//	return err
+	//}
+	//if 1 != receipt.Status {
+	//	logger.Error("unescrow3", "err", receipt.Status)
+	//	return err
+	//}
 	return nil
 }
 

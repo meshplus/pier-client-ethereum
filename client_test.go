@@ -26,6 +26,7 @@ import (
 	"github.com/ethereum/go-ethereum/trie"
 	contracts "github.com/meshplus/bitxhub-core/eth-contracts"
 	"github.com/meshplus/bitxhub-model/pb"
+	"github.com/stretchr/testify/require"
 )
 
 func TestM(t *testing.T) {
@@ -35,17 +36,25 @@ func TestM(t *testing.T) {
 	//header, err := etherCli.HeaderByNumber(context.Background(), big.NewInt(100))
 	//require.Nil(t, err)
 	//fmt.Printf("header 100 is %v\n", header)
-	etherCli, _ := ethclient.Dial("wss://ropsten.infura.io/ws/v3/042b7404d74f4f18bbca771786fed781")
-	block, _ := etherCli.BlockByNumber(context.Background(), big.NewInt(10499324))
+	etherCli, err := ethclient.Dial("http://121.41.217.124:8545")
+	require.Nil(t, err)
+	number, err := etherCli.BlockNumber(context.Background())
+	if err != nil {
+		fmt.Println(err)
+	}
+	require.Nil(t, err)
+
+	fmt.Println(number)
+	block, _ := etherCli.BlockByNumber(context.Background(), big.NewInt(10540394))
 	s, _ := json.Marshal(block.Header())
 	fmt.Println(string(s))
-	//
+
 	//bytes := common.RightPadBytes([]byte("PIER_ROLE"), 32)
 	//fmt.Println(common.Bytes2Hex(bytes))
 }
 
 func TestGetPrivKey(t *testing.T) {
-	configPath := "/Users/windiyi/.pier/eth"
+	configPath := "./config"
 	cfg, _ := UnmarshalConfig(configPath)
 
 	keyPath := filepath.Join(configPath, cfg.Ether.KeyPath)
