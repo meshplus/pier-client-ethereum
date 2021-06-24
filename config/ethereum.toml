@@ -1,5 +1,5 @@
 [ether]
-addr = "wss://ropsten.infura.io/ws/v3/042b7404d74f4f18bbca771786fed781"
+addr = "https://ropsten.infura.io/v3/042b7404d74f4f18bbca771786fed781"
 name = "ether"
 contract_address = "0xD3880ea40670eD51C3e3C0ea089fDbDc9e3FBBb4"
 escrows_address = "0xa670a4891490a732BF17B5f8022B51c989c5E5ab"
