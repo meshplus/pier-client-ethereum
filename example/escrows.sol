@@ -24,6 +24,7 @@ contract Escrows is AccessControl {
     uint256 public appchainIndex = 0;
     uint256 public relayIndex = 0;
 
+
     bytes32 public constant RELAYER_ROLE = "RELAYER_ROLE"; //0x52454c415945525f524f4c450000000000000000000000000000000000000000
     bytes32 public constant PIER_ROLE = "PIER_ROLE";   //0x504945525f524f4c450000000000000000000000000000000000000000000000
 
@@ -31,7 +32,7 @@ contract Escrows is AccessControl {
         address ethToken,
         address relayToken,
         address locker,
-        address recipient,
+        string recipient,
         uint256 amount,
         uint256 appchainIndex
     );
@@ -42,6 +43,11 @@ contract Escrows is AccessControl {
         address recipient,
         uint256 amount,
         string txid
+    );
+
+    event QuickSwap(
+        string dstChainId,
+        string dstContract
     );
 
     constructor(address[] memory _relayers) public {
@@ -89,7 +95,7 @@ contract Escrows is AccessControl {
     }
 
 
-    function lock(address token, uint256 amount, address recipient) public onlySupportToken(token) {
+    function lock(address token, uint256 amount, string memory recipient) public onlySupportToken(token) {
         lockAmount[token] = lockAmount[token].add(
             amount
         );
@@ -104,6 +110,12 @@ contract Escrows is AccessControl {
             amount,
             appchainIndex
         );
+    }
+
+
+    function quickSwap(string memory dstChainId, string memory dstContract, address token, uint256 amount, string memory recipient) public onlySupportToken(token) {
+        lock(token, amount, recipient);
+        emit QuickSwap(dstChainId,dstContract);
     }
 
     function unlock(

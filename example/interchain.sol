@@ -17,8 +17,9 @@ contract InterchainSwap is AccessControl {
     using SafeDecimalMath for uint256;
     using EnumerableSet for EnumerableSet.AddressSet;
 
-    mapping(address => address) public eth2bxhToken;
-    mapping(address => address) public bxh2ethToken;
+    mapping(address => address) public appToken2Pier;
+    mapping(address => address) public app2bxhToken;
+    mapping(address => address) public bxh2appToken;
     mapping(address => uint256) public mintAmount;
     mapping(uint256 => uint256) public index2Height;
     mapping(string => bool) public txMinted;
@@ -28,7 +29,8 @@ contract InterchainSwap is AccessControl {
     bytes32 public constant PIER_ROLE = "PIER_ROLE"; //0x504945525f524f4c450000000000000000000000000000000000000000000000
 
     event Burn(
-        address ethToken,
+        address pier,
+        address appToken,
         address relayToken,
         address burner,
         address recipient,
@@ -36,7 +38,7 @@ contract InterchainSwap is AccessControl {
         uint256 relayIndex
     );
     event Mint(
-        address ethToken,
+        address appToken,
         address relayToken,
         address from,
         address recipient,
@@ -52,36 +54,38 @@ contract InterchainSwap is AccessControl {
         }
     }
 
-    function addSupportToken(address ethTokenAddr, address relayTokenAddr) public onlyAdmin {
+    function addSupportToken(address pierId, address appTokenAddr, address relayTokenAddr) public onlyAdmin {
         require(
-            eth2bxhToken[ethTokenAddr] == address(0),
+            app2bxhToken[appTokenAddr] == address(0),
             "Token already Supported"
         );
         require(
-            bxh2ethToken[relayTokenAddr] == address(0),
+            bxh2appToken[relayTokenAddr] == address(0),
             "Token already Supported"
         );
-        eth2bxhToken[ethTokenAddr] = relayTokenAddr;
-        bxh2ethToken[relayTokenAddr] = ethTokenAddr;
+        appToken2Pier[appTokenAddr] = pierId;
+        app2bxhToken[appTokenAddr] = relayTokenAddr;
+        bxh2appToken[relayTokenAddr] = appTokenAddr;
     }
 
-    function removeSupportToken(address ethTokenAddr) public onlyAdmin {
-        require(eth2bxhToken[ethTokenAddr] != address(0), "Token not Supported");
-        delete bxh2ethToken[eth2bxhToken[ethTokenAddr]];
-        delete eth2bxhToken[ethTokenAddr];
+    function removeSupportToken(address appTokenAddr) public onlyAdmin {
+        require(app2bxhToken[appTokenAddr] != address(0), "Token not Supported");
+        delete bxh2appToken[app2bxhToken[appTokenAddr]];
+        delete app2bxhToken[appTokenAddr];
 
     }
 
     function addSupportTokens(
-        address[] memory ethTokenAddrs,
+        address[] memory pierIds,
+        address[] memory appTokenAddrs,
         address[] memory relayTokenAddrs
     ) public {
         require(
-            ethTokenAddrs.length == relayTokenAddrs.length,
+            appTokenAddrs.length == relayTokenAddrs.length,
             "Token length not match"
         );
-        for (uint256 i; i < ethTokenAddrs.length; i++) {
-            addSupportToken(ethTokenAddrs[i], relayTokenAddrs[i]);
+        for (uint256 i; i < appTokenAddrs.length; i++) {
+            addSupportToken(pierIds[i], appTokenAddrs[i], relayTokenAddrs[i]);
         }
     }
 
@@ -92,26 +96,27 @@ contract InterchainSwap is AccessControl {
     }
 
 
-    function burn(address relayToken, uint256 amount, address recipient) public onlySupportToken(bxh2ethToken[relayToken]) {
+    function burn(address relayToken, uint256 amount, address recipient) public onlySupportToken(bxh2appToken[relayToken]) {
         mintAmount[relayToken] = mintAmount[relayToken].sub(
             amount
         );
         IMintBurn(relayToken).burn(msg.sender, amount);
         relayIndex = relayIndex.add(1);
         index2Height[relayIndex]=block.number;
-        emit Burn(bxh2ethToken[relayToken], relayToken, msg.sender, recipient, amount, relayIndex);
+        address appchainToken = bxh2appToken[relayToken];
+        emit Burn(appToken2Pier[appchainToken], appchainToken, relayToken, msg.sender, recipient, amount, relayIndex);
     }
 
     function mint(
-        address ethToken,
+        address appToken,
         address relayToken,
         address from,
         address recipient,
         uint256 amount,
         string memory _txid,
         uint256 _appchainIndex
-    ) public onlySupportToken(ethToken) onlyCrosser whenNotMinted(_txid) {
-        require(eth2bxhToken[ethToken] == relayToken, "Burn::Not Support Token");
+    ) public onlySupportToken(appToken) onlyCrosser whenNotMinted(_txid) {
+        require(app2bxhToken[appToken] == relayToken, "Burn::Not Support Token");
         if (appchainIndex != _appchainIndex - 1) {
             revert("index not match");
         }
@@ -119,11 +124,11 @@ contract InterchainSwap is AccessControl {
         appchainIndex = appchainIndex.add(1);
         mintAmount[relayToken] = mintAmount[relayToken].add(amount);
         IMintBurn(relayToken).mint(recipient, amount);
-        emit Mint(ethToken, relayToken, from, recipient, amount, _txid, appchainIndex);
+        emit Mint(appToken, relayToken, from, recipient, amount, _txid, appchainIndex);
     }
 
     modifier onlySupportToken(address token) {
-        require(eth2bxhToken[token] != address(0), "Mint or Burn::Not Support Token");
+        require(app2bxhToken[token] != address(0), "Mint or Burn::Not Support Token");
         _;
     }
 
