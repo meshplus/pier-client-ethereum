@@ -5,6 +5,8 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/Rican7/retry"
+	"github.com/Rican7/retry/strategy"
 	"github.com/meshplus/bitxhub-model/pb"
 
 	"github.com/ethereum/go-ethereum/core/types"
@@ -80,10 +82,18 @@ func (c *Client) listenHeader() {
 			}
 			for i := c.headerPool.currentNum; i <= latestHeight-Threshold; i++ {
 				c.headerPool.currentNum++
-				header, err := c.ethClient.HeaderByNumber(c.ctx, big.NewInt(int64(c.headerPool.currentNum)))
-				if err != nil {
-					return
+				var header *types.Header
+				if err := retry.Retry(func(attempt uint) error {
+					var err error
+					header, err = c.ethClient.HeaderByNumber(c.ctx, big.NewInt(int64(c.headerPool.currentNum)))
+					if err != nil {
+						return err
+					}
+					return nil
+				}, strategy.Wait(1*time.Second)); err != nil {
+					logger.Error("Can't receive head from ethclient", "error", err.Error())
 				}
+
 				c.headerPool.recvHeaderCh <- header
 			}
 		case <-c.ctx.Done():

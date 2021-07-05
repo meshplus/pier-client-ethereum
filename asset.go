@@ -44,6 +44,7 @@ func (c *Client) postLock() {
 					}
 				} else {
 					// not enough attach current height will redo in preLockCh
+					// todo set a queue
 					c.preLockCh <- event
 				}
 			case <-c.ctx.Done():
