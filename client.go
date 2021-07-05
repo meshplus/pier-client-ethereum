@@ -698,19 +698,19 @@ func (c *Client) packFuncArgs(function string, args [][]byte, abi *abi.ABI) ([]b
 	return packed, nil
 }
 
-func (c *Client) QueryFilterLockStart(appchainIndex int64) int64 {
-	res, err := c.escrowsSession.Index2Height(big.NewInt(appchainIndex))
+func (c *Client) QueryFilterLockStart(appchainIndex uint64) (uint64, error) {
+	res, err := c.escrowsSession.Index2Height(new(big.Int).SetUint64(appchainIndex))
 	if err != nil {
-		return 0
+		return 0, err
 	}
-	return res.Int64()
+	return res.Uint64(), nil
 }
 
-func (c *Client) QueryLockEventByIndex(index int64) *pb.LockEvent {
+func (c *Client) QueryLockEventByIndex(index uint64) (*pb.LockEvent, error) {
 	var lockCh *pb.LockEvent
-	height, er := c.escrowsSession.Index2Height(big.NewInt(index))
+	height, er := c.escrowsSession.Index2Height(new(big.Int).SetUint64(index))
 	if er != nil {
-		return nil
+		return nil, er
 	}
 	end := height.Uint64()
 	filterOpt := &bind.FilterOpts{
@@ -732,7 +732,7 @@ func (c *Client) QueryLockEventByIndex(index int64) *pb.LockEvent {
 		logger.Error("Can't get filter mint event", "error", err.Error())
 	}
 	for iter.Next() {
-		if index != iter.Event.AppchainIndex.Int64() {
+		if index != iter.Event.AppchainIndex.Uint64() {
 			continue
 		}
 		raw := &iter.Event.Raw
@@ -778,22 +778,22 @@ func (c *Client) QueryLockEventByIndex(index int64) *pb.LockEvent {
 			logger.Error("Can't retrieve mint event from receipt", "error", err.Error())
 		}
 	}
-	return lockCh
+	return lockCh, nil
 }
 
-func (c *Client) QueryAppchainIndex() int64 {
+func (c *Client) QueryAppchainIndex() (uint64, error) {
 	res, err := c.escrowsSession.AppchainIndex()
 	if err != nil {
-		return 0
+		return 0, err
 	}
-	return res.Int64()
+	return res.Uint64(), nil
 }
-func (c *Client) QueryRelayIndex() int64 {
+func (c *Client) QueryRelayIndex() (uint64, error) {
 	res, err := c.escrowsSession.RelayIndex()
 	if err != nil {
-		return 0
+		return 0, err
 	}
-	return res.Int64()
+	return res.Uint64(), nil
 }
 
 func main() {
