@@ -21,10 +21,10 @@ contract InterchainSwap is AccessControl {
     mapping(address => address) public app2bxhToken;
     mapping(address => address) public bxh2appToken;
     mapping(address => uint256) public mintAmount;
-    mapping(uint256 => uint256) public index2Height;
+    mapping(address => mapping(uint256 => uint256)) public index2Height;
     mapping(string => bool) public txMinted;
-    uint256 public appchainIndex = 0;
-    uint256 public relayIndex = 0;
+    mapping(address => uint256) public appchainIndex;
+    mapping(address => uint256) public relayIndex;
 
     bytes32 public constant PIER_ROLE = "PIER_ROLE"; //0x504945525f524f4c450000000000000000000000000000000000000000000000
 
@@ -101,10 +101,11 @@ contract InterchainSwap is AccessControl {
             amount
         );
         IMintBurn(relayToken).burn(msg.sender, amount);
-        relayIndex = relayIndex.add(1);
-        index2Height[relayIndex]=block.number;
         address appchainToken = bxh2appToken[relayToken];
-        emit Burn(appToken2Pier[appchainToken], appchainToken, relayToken, msg.sender, recipient, amount, relayIndex);
+        address pierAddr = appToken2Pier[appchainToken];
+        relayIndex[pierAddr] = relayIndex[pierAddr].add(1);
+        index2Height[pierAddr][relayIndex[pierAddr]]=block.number;
+        emit Burn(pierAddr, appchainToken, relayToken, msg.sender, recipient, amount, relayIndex[pierAddr]);
     }
 
     function mint(
@@ -117,14 +118,15 @@ contract InterchainSwap is AccessControl {
         uint256 _appchainIndex
     ) public onlySupportToken(appToken) onlyCrosser whenNotMinted(_txid) {
         require(app2bxhToken[appToken] == relayToken, "Burn::Not Support Token");
-        if (appchainIndex != _appchainIndex - 1) {
+        address pierAddr = appToken2Pier[appToken];
+        if (appchainIndex[pierAddr] != _appchainIndex - 1) {
             revert("index not match");
         }
         txMinted[_txid] = true;
-        appchainIndex = appchainIndex.add(1);
+        appchainIndex[pierAddr] = appchainIndex[pierAddr].add(1);
         mintAmount[relayToken] = mintAmount[relayToken].add(amount);
         IMintBurn(relayToken).mint(recipient, amount);
-        emit Mint(appToken, relayToken, from, recipient, amount, _txid, appchainIndex);
+        emit Mint(appToken, relayToken, from, recipient, amount, _txid, appchainIndex[pierAddr]);
     }
 
     modifier onlySupportToken(address token) {

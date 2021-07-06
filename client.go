@@ -33,8 +33,9 @@ import (
 )
 
 //go:generate abigen --sol ./example/broker.sol --pkg main --out broker.go
-//go:generate abigen --sol ./example/interchain.sol --pkg main --out interchain.go
-//go:generate abigen --sol ./example/escrows.sol --pkg main --out escrows.go
+//go:generate abigen --sol ./example/interchain.sol --pkg contracts --out interchain.go
+//go:generate abigen --sol ./example/escrows.sol --pkg contracts --out escrows.go
+//go:generate abigen --sol ./example/proxy.sol --pkg contracts --out proxy.go
 type Client struct {
 	abi            abi.ABI
 	config         *Config
