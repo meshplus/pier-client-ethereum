@@ -1,14 +1,11 @@
 package main
 
 import (
-	"encoding/json"
 	"math/big"
 	"time"
 
 	"github.com/Rican7/retry"
 	"github.com/Rican7/retry/strategy"
-	"github.com/meshplus/bitxhub-model/pb"
-
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
@@ -53,11 +50,11 @@ func (c *Client) postHeaders() {
 				batch := c.headerPool.headersSet
 				c.filterLog(batch)
 				c.headerPool.headersSet = make([]*types.Header, 0, defaultCap)
-				data, _ := json.Marshal(batch)
-				c.metaC <- &pb.UpdateMeta{
-					Meta:      data,
-					EndHeader: batch[len(batch)-1].Number.Uint64(),
-				}
+				//data, _ := json.Marshal(batch)
+				//c.metaC <- &pb.UpdateMeta{
+				//	Meta:      data,
+				//	EndHeader: batch[len(batch)-1].Number.Uint64(),
+				//}
 			}
 		case <-c.ctx.Done():
 			ticker.Stop()

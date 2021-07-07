@@ -24,7 +24,7 @@ import (
 	"github.com/ethereum/go-ethereum/light"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
-	contracts "github.com/meshplus/bitxhub-core/eth-contracts"
+	contracts "github.com/meshplus/bitxhub-core/eth-contracts/escrows-contracts"
 	"github.com/meshplus/bitxhub-model/pb"
 	"github.com/stretchr/testify/require"
 )

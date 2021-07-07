@@ -25,9 +25,10 @@ import (
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/go-plugin"
-	contracts "github.com/meshplus/bitxhub-core/eth-contracts"
+	contracts "github.com/meshplus/bitxhub-core/eth-contracts/escrows-contracts"
 	"github.com/meshplus/bitxhub-model/pb"
 	"github.com/meshplus/bitxid"
+	"github.com/meshplus/pier-client-ethereum/kit"
 	"github.com/meshplus/pier-client-ethereum/solidity"
 	"github.com/meshplus/pier/pkg/plugins"
 )
@@ -37,23 +38,25 @@ import (
 //go:generate abigen --sol ./example/escrows.sol --pkg contracts --out escrows.go
 //go:generate abigen --sol ./example/proxy.sol --pkg contracts --out proxy.go
 type Client struct {
-	abi            abi.ABI
-	config         *Config
-	ctx            context.Context
-	ethClient      *ethclient.Client
-	broker         *Broker
-	brokerSession  *BrokerSession
-	escrowsSession *contracts.EscrowsSession
-	conn           *rpc.Client
-	eventC         chan *pb.IBTP
-	metaC          chan *pb.UpdateMeta
-	filterOptCh    chan *bind.FilterOpts
-	logCh          chan *contracts.EscrowsLock
-	lockCh         chan *pb.LockEvent
-	preLockCh      chan *PreLockEvent
-	appchainID     string // the method of connected appchain like did:bitxhub:appchain:.
-	bizABI         map[string]*abi.ABI
-	headerPool     *headerPool
+	abi             abi.ABI
+	config          *Config
+	ctx             context.Context
+	ethClient       *ethclient.Client
+	broker          *Broker
+	brokerSession   *BrokerSession
+	escrowsSession  *contracts.EscrowsSession
+	conn            *rpc.Client
+	eventC          chan *pb.IBTP
+	metaC           chan *pb.UpdateMeta
+	filterOptCh     chan *bind.FilterOpts
+	logCh           chan *contracts.EscrowsLock
+	lockCh          chan *pb.LockEvent
+	preLockCh       chan *kit.PreLockEvent
+	preLockQueue    *kit.PreLockQueue
+	preLockPriority int
+	appchainID      string // the method of connected appchain like did:bitxhub:appchain:.
+	bizABI          map[string]*abi.ABI
+	headerPool      *headerPool
 }
 
 const (
@@ -148,7 +151,6 @@ func (c *Client) Initialize(configPath string, appchainID string, extra []byte) 
 		},
 		TransactOpts: *auth,
 	}
-	c.headerPool = newHeaderPool(currentHeight)
 
 	ab, err := abi.JSON(bytes.NewReader([]byte(BrokerABI)))
 	if err != nil {
@@ -180,7 +182,9 @@ func (c *Client) Initialize(configPath string, appchainID string, extra []byte) 
 	c.filterOptCh = make(chan *bind.FilterOpts, 1024)
 	c.logCh = make(chan *contracts.EscrowsLock, 1024)
 	c.lockCh = make(chan *pb.LockEvent, 1024)
-	c.preLockCh = make(chan *PreLockEvent, 1024)
+	c.preLockCh = make(chan *kit.PreLockEvent, 1024)
+	c.preLockQueue = &kit.PreLockQueue{}
+	c.preLockPriority = 0
 	c.ethClient = etherCli
 	c.broker = broker
 	c.brokerSession = brokerSession
@@ -189,6 +193,14 @@ func (c *Client) Initialize(configPath string, appchainID string, extra []byte) 
 	c.conn = conn
 	c.appchainID = appchainID
 	c.bizABI = bizAbi
+
+	appchainIndex, _ := c.QueryAppchainIndex()
+	if 0 == appchainIndex {
+		currentHeight, _ = c.ethClient.BlockNumber(c.ctx)
+	} else {
+		currentHeight, _ = c.QueryFilterLockStart(appchainIndex)
+	}
+	c.headerPool = newHeaderPool(currentHeight)
 
 	return nil
 }

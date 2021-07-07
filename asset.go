@@ -12,22 +12,16 @@ import (
 	"github.com/ethereum/go-ethereum/light"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
-	contracts "github.com/meshplus/bitxhub-core/eth-contracts"
+	contracts "github.com/meshplus/bitxhub-core/eth-contracts/escrows-contracts"
 	"github.com/meshplus/bitxhub-model/pb"
+	"github.com/meshplus/pier-client-ethereum/kit"
 )
-
-type PreLockEvent struct {
-	Receipt       []byte
-	Proof         []byte
-	AppchainIndex uint64
-	BlockNumber   uint64
-}
 
 func (c *Client) postLock() {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
-
-	loop := func(ch <-chan *PreLockEvent) {
+	go c.postLostPreLock()
+	loop := func(ch <-chan *kit.PreLockEvent) {
 		for {
 			select {
 			case event, ok := <-ch:
@@ -35,7 +29,7 @@ func (c *Client) postLock() {
 					logger.Warn("preLockEvent handle error")
 					return
 				}
-				if c.headerPool.currentNum-event.BlockNumber > 20 {
+				if c.headerPool.currentNum-event.BlockNumber > 1 {
 					c.lockCh <- &pb.LockEvent{
 						AppchainIndex: event.AppchainIndex,
 						Receipt:       event.Receipt,
@@ -44,8 +38,8 @@ func (c *Client) postLock() {
 					}
 				} else {
 					// not enough attach current height will redo in preLockCh
-					// todo set a queue
-					c.preLockCh <- event
+					c.preLockPriority++
+					c.preLockQueue.Push(kit.PreLockConstructor(event, c.preLockPriority))
 				}
 			case <-c.ctx.Done():
 				return
@@ -57,6 +51,38 @@ func (c *Client) postLock() {
 		case <-ticker.C:
 			ch := c.preLockCh
 			loop(ch)
+		case <-c.ctx.Done():
+			ticker.Stop()
+			return
+		}
+	}
+}
+
+func (c *Client) postLostPreLock() {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if c.preLockQueue.Len() == 0 {
+				continue
+			}
+			preLock := c.preLockQueue.Pop()
+			event := preLock.(*kit.PreLock).GetPreLockEvent()
+			preLockPriority := preLock.(*kit.PreLock).GetPriority()
+			if c.headerPool.currentNum-event.BlockNumber > 1 {
+				c.lockCh <- &pb.LockEvent{
+					AppchainIndex: event.AppchainIndex,
+					Receipt:       event.Receipt,
+					Proof:         event.Proof,
+					BlockNumber:   event.BlockNumber,
+				}
+			} else {
+				// not enough attach current height will redo in preLockCh
+				c.preLockQueue.Push(kit.PreLockConstructor(
+					event,
+					preLockPriority))
+			}
 		case <-c.ctx.Done():
 			ticker.Stop()
 			return
@@ -99,7 +125,7 @@ func (c *Client) listenLock() {
 				if err != nil {
 					return err
 				}
-				c.preLockCh <- &PreLockEvent{
+				c.preLockCh <- &kit.PreLockEvent{
 					AppchainIndex: log.AppchainIndex.Uint64(),
 					Receipt:       receiptData,
 					Proof:         proof,

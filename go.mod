@@ -8,7 +8,7 @@ require (
 	github.com/ethereum/go-ethereum v1.10.4
 	github.com/hashicorp/go-hclog v0.0.0-20180709165350-ff2cf002a8dd
 	github.com/hashicorp/go-plugin v1.3.0
-	github.com/meshplus/bitxhub-core v1.3.1-0.20210611011450-ca11d623d8cc
+	github.com/meshplus/bitxhub-core v1.3.1-0.20210708054838-00de516e0ffd
 	github.com/meshplus/bitxhub-model v1.2.1-0.20210701090843-8709b8dc88a6
 	github.com/meshplus/bitxid v0.0.0-20210412025850-e0eaf0f9063a
 	github.com/meshplus/pier v1.7.1-0.20210701092509-5ee894fbed5b

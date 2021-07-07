@@ -37,15 +37,14 @@ contract Proxy is AccessControl {
         address dstContract
     ) public {
         InterchainSwap(_interchainAddr).mint(appToken, relayToken,from, address(this),amount,_txid, _appchainIndex);
-        IERC20(relayToken).approve(_dexAddr, 10000000000000000000);
-        // todo addSupportToken
+        IERC20(relayToken).approve(_dexAddr, amount);
         address dstRelayToken = InterchainSwap(_interchainAddr).app2bxhToken(dstContract);
         //address[2] memory adds = [relayToken, dstRelayToken];
         address[] memory adds = new address[](2);
         adds[0] = relayToken;
         adds[1] = dstRelayToken;
-        uint[] memory amounts = IUniswapV2Router01(_dexAddr).swapExactTokensForTokens(amount,0, adds, address(this), block.number + 10);
-        IERC20(dstRelayToken).approve(_interchainAddr, 100000000000000000000000);
+        uint[] memory amounts = IUniswapV2Router01(_dexAddr).swapExactTokensForTokens(amount,0, adds, address(this), block.timestamp + 60);
+        IERC20(dstRelayToken).approve(_interchainAddr, amounts[amounts.length-1]);
         InterchainSwap(_interchainAddr).burn(dstRelayToken, amounts[amounts.length-1], recipient);
     }
 

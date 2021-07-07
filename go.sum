@@ -754,8 +754,9 @@ github.com/mattn/go-sqlite3 v1.11.0/go.mod h1:FPy6KqzDD04eiIsT53CuJW3U88zkxoIYsO
 github.com/mattn/go-tty v0.0.0-20180907095812-13ff1204f104/go.mod h1:XPvLUNfbS4fJH25nqRHfWLMa1ONC8Amw+mIA639KxkE=
 github.com/mattn/goveralls v0.0.2/go.mod h1:8d1ZMHsd7fW6IRPKQh46F2WRpyib5/X4FOpevwGNQEw=
 github.com/matttproud/golang_protobuf_extensions v1.0.1/go.mod h1:D8He9yQNgCq6Z5Ld7szi9bcBfOoFv/3dc6xSMkL2PC0=
-github.com/meshplus/bitxhub-core v1.3.1-0.20210611011450-ca11d623d8cc h1:GbEwyjik32zrvoxImU6pk87M71dlEzbLbHslzE77E+c=
 github.com/meshplus/bitxhub-core v1.3.1-0.20210611011450-ca11d623d8cc/go.mod h1:fX3TYjno+f89ZTLlR6sdh0t+iAg2+qzIb1nPCYkdr3g=
+github.com/meshplus/bitxhub-core v1.3.1-0.20210708054838-00de516e0ffd h1:MANGmhZ/cOdfCfQpFmNphmFOaGV0k4RORXchO3KdcgY=
+github.com/meshplus/bitxhub-core v1.3.1-0.20210708054838-00de516e0ffd/go.mod h1:53moT6PcRNih+eBABVGDacVSdlnVSNifrRPforptcPs=
 github.com/meshplus/bitxhub-kit v1.0.0-rc1/go.mod h1:ra/AhOkPvpElI+wXrB9G6DjdcrdxFU3vMwA5MYKr9D0=
 github.com/meshplus/bitxhub-kit v1.0.0/go.mod h1:7cWyhXWZfrQ3+EaxkRoXfuiG3Y5R9DXYJomeZKkETW8=
 github.com/meshplus/bitxhub-kit v1.1.1/go.mod h1:r4l4iqn0RPJreb/OmoYKfjCjQJrXpZX++6Qc31VG/1k=
@@ -766,6 +767,7 @@ github.com/meshplus/bitxhub-model v1.0.0-rc3/go.mod h1:ZCctQIYTlE3vJ8Lhkrgs9bWwN
 github.com/meshplus/bitxhub-model v1.1.1/go.mod h1:lUl9vPZXM9tP+B0ABRW/2eOW/6KCmjFTdoiTj5Vut/A=
 github.com/meshplus/bitxhub-model v1.2.1-0.20210524063354-5d48e2fee178/go.mod h1:vwJ+sHPUyA2JELmUUDBol+7zA+7GcqutxzqXjsN0QLA=
 github.com/meshplus/bitxhub-model v1.2.1-0.20210615063046-9ddbc0d3e369/go.mod h1:vwJ+sHPUyA2JELmUUDBol+7zA+7GcqutxzqXjsN0QLA=
+github.com/meshplus/bitxhub-model v1.2.1-0.20210617153656-84ba97c3a8f8/go.mod h1:nzr75gGrBktLo9PHfNpFoX7F8gV8crBYMV2xR+WUyZE=
 github.com/meshplus/bitxhub-model v1.2.1-0.20210701090843-8709b8dc88a6 h1:5JB7d2CnefmblkHmuVZ5ruKPcMav8a8+07gAieHcGGM=
 github.com/meshplus/bitxhub-model v1.2.1-0.20210701090843-8709b8dc88a6/go.mod h1:IjgoQrsn1wthW7XcKRqgaZqCSlqNy0SBwF/7lmGSqXc=
 github.com/meshplus/bitxid v0.0.0-20210412025850-e0eaf0f9063a h1:c4ESPDa60Jd4zfzZIGGTyzhfaVM3vKN+xV2G9BwIDGQ=
