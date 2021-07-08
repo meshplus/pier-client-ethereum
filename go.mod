@@ -16,3 +16,5 @@ require (
 	github.com/spf13/viper v1.7.0
 	github.com/stretchr/testify v1.7.0
 )
+
+replace github.com/ethereum/go-ethereum => github.com/ethereum/go-ethereum v1.10.2

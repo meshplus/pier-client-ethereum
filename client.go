@@ -60,7 +60,7 @@ type Client struct {
 }
 
 const (
-	EtherType        = "ethereum"
+	EtherType        = "bsc"
 	InvokeInterchain = "invokeInterchain"
 	Threshold        = 20
 	MintEventName    = "Mint"
