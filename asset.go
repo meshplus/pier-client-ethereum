@@ -29,7 +29,7 @@ func (c *Client) postLock() {
 					logger.Warn("preLockEvent handle error")
 					return
 				}
-				if c.headerPool.currentNum-event.BlockNumber > 1 {
+				if c.headerPool.currentNum-event.BlockNumber > 15 {
 					c.lockCh <- &pb.LockEvent{
 						AppchainIndex: event.AppchainIndex,
 						Receipt:       event.Receipt,
@@ -68,9 +68,9 @@ func (c *Client) postLostPreLock() {
 				continue
 			}
 			preLock := c.preLockQueue.Pop()
-			event := preLock.(*kit.PreLock).GetPreLockEvent()
-			preLockPriority := preLock.(*kit.PreLock).GetPriority()
-			if c.headerPool.currentNum-event.BlockNumber > 1 {
+			event := preLock.(kit.PreLock).GetPreLockEvent()
+			preLockPriority := preLock.(kit.PreLock).GetPriority()
+			if c.headerPool.currentNum-event.BlockNumber > 15 {
 				c.lockCh <- &pb.LockEvent{
 					AppchainIndex: event.AppchainIndex,
 					Receipt:       event.Receipt,

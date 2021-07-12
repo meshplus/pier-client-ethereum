@@ -16,11 +16,11 @@ func PreLockConstructor(preLockEvent *PreLockEvent, priority int) PreLock {
 	return PreLock{preLockEvent, priority}
 }
 
-func (p *PreLock) GetPreLockEvent() *PreLockEvent {
+func (p PreLock) GetPreLockEvent() *PreLockEvent {
 	return p.preLockEvent
 }
 
-func (p *PreLock) GetPriority() int {
+func (p PreLock) GetPriority() int {
 	return p.priority
 }
 

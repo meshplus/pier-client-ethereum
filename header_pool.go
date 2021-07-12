@@ -77,7 +77,7 @@ func (c *Client) listenHeader() {
 				logger.Error("get most recent height", "error", err.Error())
 				continue
 			}
-			for i := c.headerPool.currentNum; i <= latestHeight-Threshold; i++ {
+			for i := c.headerPool.currentNum; i <= latestHeight; i++ { //Threshold
 				c.headerPool.currentNum++
 				var header *types.Header
 				if err := retry.Retry(func(attempt uint) error {
