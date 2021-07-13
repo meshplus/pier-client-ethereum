@@ -95,6 +95,19 @@ contract InterchainSwap is AccessControl {
         }
     }
 
+    function lockRollback(
+        address appToken,
+        address relayToken,
+        address from,
+        address recipient,
+        uint256 amount,
+        string memory _txid,
+        uint256 _appchainIndex
+    ) public {
+        mint(appToken, relayToken, from, address(this),amount,_txid, _appchainIndex);
+        IERC20(relayToken).approve(address(this), amount);
+        burn(relayToken, amount, from);
+    }
 
     function burn(address relayToken, uint256 amount, address recipient) public onlySupportToken(bxh2appToken[relayToken]) {
         mintAmount[relayToken] = mintAmount[relayToken].sub(
