@@ -104,9 +104,21 @@ contract InterchainSwap is AccessControl {
         string memory _txid,
         uint256 _appchainIndex
     ) public {
-        mint(appToken, relayToken, from, msg.sender, amount,_txid, _appchainIndex);
-        IERC20(relayToken).approve(msg.sender, amount);
-        burn(relayToken, amount, from);
+        mint(appToken, relayToken, from, address(this), amount,_txid, _appchainIndex);
+        IERC20(relayToken).approve(address(this), amount);
+        burnSelf(relayToken, amount, from);
+    }
+
+    function burnSelf(address relayToken, uint256 amount, address recipient) public onlySupportToken(bxh2appToken[relayToken]) {
+        mintAmount[relayToken] = mintAmount[relayToken].sub(
+            amount
+        );
+        IMintBurn(relayToken).burn(address(this), amount);
+        address appchainToken = bxh2appToken[relayToken];
+        address pierAddr = appToken2Pier[appchainToken];
+        relayIndex[pierAddr] = relayIndex[pierAddr].add(1);
+        index2Height[pierAddr][relayIndex[pierAddr]]=block.number;
+        emit Burn(pierAddr, appchainToken, relayToken, address(this), recipient, amount, relayIndex[pierAddr]);
     }
 
     function burn(address relayToken, uint256 amount, address recipient) public onlySupportToken(bxh2appToken[relayToken]) {
