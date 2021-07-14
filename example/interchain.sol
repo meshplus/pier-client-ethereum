@@ -104,8 +104,8 @@ contract InterchainSwap is AccessControl {
         string memory _txid,
         uint256 _appchainIndex
     ) public {
-        mint(appToken, relayToken, from, address(this),amount,_txid, _appchainIndex);
-        IERC20(relayToken).approve(address(this), amount);
+        mint(appToken, relayToken, from, msg.sender, amount,_txid, _appchainIndex);
+        IERC20(relayToken).approve(msg.sender, amount);
         burn(relayToken, amount, from);
     }
 
