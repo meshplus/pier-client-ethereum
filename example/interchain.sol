@@ -109,7 +109,7 @@ contract InterchainSwap is AccessControl {
         burnSelf(relayToken, amount, from);
     }
 
-    function burnSelf(address relayToken, uint256 amount, address recipient) public onlySupportToken(bxh2appToken[relayToken]) {
+    function burnSelf(address relayToken, uint256 amount, address recipient) internal onlySupportToken(bxh2appToken[relayToken]) {
         mintAmount[relayToken] = mintAmount[relayToken].sub(
             amount
         );
