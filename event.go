@@ -3,27 +3,25 @@ package main
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/cloudflare/cfssl/log"
 	"github.com/meshplus/bitxhub-model/pb"
-	"github.com/meshplus/bitxid"
 )
 
-func Convert2IBTP(ev *BrokerThrowEvent, srcMethod string, ibtpType pb.IBTP_Type) *pb.IBTP {
+func Convert2IBTP(ev *BrokerThrowEvent, timeoutHeight int64, ibtpType pb.IBTP_Type) *pb.IBTP {
 	pd, err := encryptPayload(ev)
 	if err != nil {
 		log.Fatalf("Get ibtp payload :%s", err)
 	}
 
 	return &pb.IBTP{
-		From:      srcMethod,
-		To:        string(bitxid.DID(ev.DestDID).GetChainDID()),
-		Index:     ev.Index,
-		Type:      ibtpType,
-		Timestamp: time.Now().UnixNano(),
-		Proof:     []byte("1"),
-		Payload:   pd,
+		From:          ev.SrcFullID,
+		To:            ev.DstFullID,
+		Index:         ev.Index,
+		Type:          ibtpType,
+		TimeoutHeight: timeoutHeight,
+		Proof:         []byte("1"),
+		Payload:       pd,
 	}
 }
 
@@ -43,14 +41,12 @@ func encryptPayload(ev *BrokerThrowEvent) ([]byte, error) {
 	}
 
 	content := &pb.Content{
-		SrcContractId: ev.Fid.String(),
-		DstContractId: bitxid.DID(ev.DestDID).GetAddress(),
-		Func:          funcs[0],
-		Args:          handleArgs(ev.Args),
-		Callback:      funcs[1],
-		ArgsCb:        handleArgs(ev.Argscb),
-		Rollback:      funcs[2],
-		ArgsRb:        handleArgs(ev.Argsrb),
+		Func:     funcs[0],
+		Args:     handleArgs(ev.Args),
+		Callback: funcs[1],
+		ArgsCb:   handleArgs(ev.Argscb),
+		Rollback: funcs[2],
+		ArgsRb:   handleArgs(ev.Argsrb),
 	}
 	data, err := content.Marshal()
 	if err != nil {

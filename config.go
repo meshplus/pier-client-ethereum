@@ -12,8 +12,8 @@ const (
 )
 
 type Config struct {
-	Ether       Ether             `toml:"ether" json:"ether"`
-	ContractABI map[string]string `mapstructure:"contract_abi" json:"contract_abi"`
+	Ether    Ether     `toml:"ether" json:"ether"`
+	Services []Service `mapstructure:"services" json:"services"`
 }
 
 type Ether struct {
@@ -23,6 +23,15 @@ type Ether struct {
 	KeyPath         string `mapstructure:"key_path" json:"key_path"`
 	Password        string `toml:"password" json:"password"`
 	MinConfirm      uint64 `mapstructure:"min_confirm" json:"min_confirm"`
+	TimeoutHeight   uint64 `mapstructure:"timeout_height" json:"timeout_height"`
+	ChainID         string `mapstructure:"chain_id" json:"chain_id"`
+}
+
+type Service struct {
+	ID   string `toml:"id" json:"id"`
+	Name string `toml:"name" json:"name"`
+	Type string `toml:"type" json:"type"`
+	Abi  string `toml:"abi" json:"abi"`
 }
 
 func defaultConfig() *Config {
@@ -34,6 +43,7 @@ func defaultConfig() *Config {
 			KeyPath:         "account.key",
 			Password:        "",
 			MinConfirm:      5,
+			TimeoutHeight:   10,
 		},
 	}
 }

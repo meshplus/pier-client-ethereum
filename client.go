@@ -25,7 +25,6 @@ import (
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/go-plugin"
 	"github.com/meshplus/bitxhub-model/pb"
-	"github.com/meshplus/bitxid"
 	"github.com/meshplus/pier-client-ethereum/solidity"
 	"github.com/meshplus/pier/pkg/plugins"
 )
@@ -88,8 +87,19 @@ func (c *Client) Initialize(configPath string, appchainID string, extra []byte) 
 		return err
 	}
 
+	chainID, ok := new(big.Int).SetString(cfg.Ether.ChainID, 10)
+	if !ok {
+		return fmt.Errorf("ethereum chain id is invalid: %s", cfg.Ether.ChainID)
+	}
 	// deploy a contract first
-	auth := bind.NewKeyedTransactor(unlockedKey.PrivateKey)
+	auth, err := bind.NewKeyedTransactorWithChainID(unlockedKey.PrivateKey, chainID)
+	if err != nil {
+		return err
+	}
+	if auth.Context == nil {
+		auth.Context = context.TODO()
+	}
+	auth.Value = nil
 	broker, err := NewBroker(common.HexToAddress(cfg.Ether.ContractAddress), etherCli)
 	if err != nil {
 		return fmt.Errorf("failed to instantiate a Broker contract: %w", err)
@@ -113,17 +123,17 @@ func (c *Client) Initialize(configPath string, appchainID string, extra []byte) 
 	}
 
 	bizAbi := make(map[string]*abi.ABI)
-	for addr, name := range cfg.ContractABI {
-		logger.Info("ContractABI", "addr", addr, "name", name)
-		content, err := ioutil.ReadFile(filepath.Join(configPath, name))
+	for _, service := range cfg.Services {
+		logger.Info("ContractABI", "addr", service.ID, "name", service.Name)
+		content, err := ioutil.ReadFile(filepath.Join(configPath, service.Abi))
 		if err != nil {
-			return fmt.Errorf("read abi %s for addr %s: %w", name, addr, err)
+			return fmt.Errorf("read abi %s for addr %s: %w", service.Name, service.ID, err)
 		}
 		abi, err := abi.JSON(bytes.NewReader(content))
 		if err != nil {
-			return fmt.Errorf("unmarshal abi %s for addr %s: %s", name, addr, err.Error())
+			return fmt.Errorf("unmarshal abi %s for addr %s: %s", service.Name, service.ID, err.Error())
 		}
-		bizAbi[addr] = &abi
+		bizAbi[service.ID] = &abi
 	}
 
 	c.config = cfg
@@ -179,15 +189,32 @@ func (c *Client) SubmitIBTP(ibtp *pb.IBTP) (*pb.SubmitIBTPResponse, error) {
 		return nil, fmt.Errorf("invalid ibtp category")
 	}
 
+	var (
+		bizData           []byte
+		err               error
+		serviceID         string
+		srcChainServiceID string
+		ok                bool
+		bAbi              *abi.ABI
+	)
+
+	if ibtp.Category() == pb.IBTP_REQUEST {
+		srcChainServiceID = ibtp.From
+		_, _, serviceID, err = parseChainServiceID(ibtp.To)
+	} else {
+		srcChainServiceID = ibtp.To
+		_, _, serviceID, err = parseChainServiceID(ibtp.From)
+	}
+
 	var result [][]byte
-	logger.Info("submit ibtp", "id", ibtp.ID(), "contract", content.DstContractId, "func", content.Func)
+	logger.Info("submit ibtp", "from", srcChainServiceID, "to", serviceID, "index", ibtp.Index, "func", content.Func)
 	for i, arg := range content.Args {
 		logger.Info("arg", strconv.Itoa(i), string(arg))
 	}
 
-	if ibtp.Category() == pb.IBTP_RESPONSE && content.Func == "" {
+	if ibtp.Category() == pb.IBTP_RESPONSE && content.Func == "" || ibtp.Type == pb.IBTP_ROLLBACK {
 		logger.Info("InvokeIndexUpdate", "ibtp", ibtp.ID())
-		success, err := c.InvokeIndexUpdate(ibtp.From, ibtp.Index, ibtp.Category())
+		success, err := c.InvokeIndexUpdate(srcChainServiceID, ibtp.Index, serviceID, uint64(ibtp.Category()))
 		if err != nil {
 			return nil, err
 		}
@@ -195,23 +222,32 @@ func (c *Client) SubmitIBTP(ibtp *pb.IBTP) (*pb.SubmitIBTPResponse, error) {
 			return nil, fmt.Errorf("update index for ibtp %s failed", ibtp.ID())
 		}
 		ret.Status = true
+
+		if ibtp.Type == pb.IBTP_ROLLBACK {
+			ret.Result, err = c.generateCallback(ibtp, nil, ret.Status)
+			if err != nil {
+				return nil, err
+			}
+		}
 		return ret, nil
 	}
 
-	var bizData []byte
-	var err error
-	bAbi, ok := c.bizABI[strings.ToLower(content.DstContractId)]
-	if !ok {
-		ret.Message = fmt.Sprintf("no abi for contract %s", content.DstContractId)
+	if err != nil {
+		ret.Message = fmt.Sprintf("pack for ibtp %s func %s and args: %s", ibtp.ID(), content.Func, err)
 	} else {
-		bizData, err = c.packFuncArgs(content.Func, content.Args, bAbi)
-		if err != nil {
-			ret.Message = fmt.Sprintf("pack for ibtp %s func %s and args: %s", ibtp.ID(), content.Func, err)
+		bAbi, ok = c.bizABI[serviceID]
+		if !ok {
+			ret.Message = fmt.Sprintf("no abi for contract %s", serviceID)
+		} else {
+			bizData, err = c.packFuncArgs(content.Func, content.Args, bAbi)
+			if err != nil {
+				ret.Message = fmt.Sprintf("pack for ibtp %s func %s and args: %s", ibtp.ID(), content.Func, err)
+			}
 		}
 	}
 	if !ok || err != nil {
 		ret.Status = false
-		success, err := c.InvokeIndexUpdateWithError(ibtp.From, ibtp.Index, ibtp.Category(), ret.Message)
+		success, err := c.InvokeIndexUpdateWithError(srcChainServiceID, ibtp.Index, serviceID, uint64(ibtp.Category()), ret.Message)
 		if err != nil {
 			return nil, err
 		}
@@ -219,7 +255,7 @@ func (c *Client) SubmitIBTP(ibtp *pb.IBTP) (*pb.SubmitIBTPResponse, error) {
 			return nil, fmt.Errorf("update index for ibtp %s failed", ibtp.ID())
 		}
 	} else {
-		receipt, err := c.InvokeInterchain(ibtp.From, ibtp.Index, content.DstContractId, ibtp.Category(), bizData)
+		receipt, err := c.InvokeInterchain(srcChainServiceID, ibtp.Index, serviceID, uint64(ibtp.Category()), bizData)
 		if err != nil {
 			return nil, fmt.Errorf("invoke interchain for ibtp %s to call %s: %w", ibtp.ID(), content.Func, err)
 		}
@@ -239,7 +275,7 @@ func (c *Client) SubmitIBTP(ibtp *pb.IBTP) (*pb.SubmitIBTPResponse, error) {
 		} else {
 			ret.Status = false
 			ret.Message = fmt.Sprintf("InvokeInterchain tx execution failed")
-			success, err := c.InvokeIndexUpdateWithError(ibtp.From, ibtp.Index, ibtp.Category(), ret.Message)
+			success, err := c.InvokeIndexUpdateWithError(srcChainServiceID, ibtp.Index, serviceID, uint64(ibtp.Category()), ret.Message)
 			if err != nil {
 				return nil, err
 			}
@@ -262,14 +298,14 @@ func (c *Client) SubmitIBTP(ibtp *pb.IBTP) (*pb.SubmitIBTPResponse, error) {
 	return ret, nil
 }
 
-func (c *Client) InvokeInterchain(srcChainMethod string, index uint64, destAddr string, category pb.IBTP_Category, bizCallData []byte) (*types.Receipt, error) {
+func (c *Client) InvokeInterchain(srcChainServiceID string, index uint64, destAddr string, reqType uint64, bizCallData []byte) (*types.Receipt, error) {
 	var tx *types.Transaction
 	var txErr error
 	if err := retry.Retry(func(attempt uint) error {
-		tx, txErr = c.session.InvokeInterchain(srcChainMethod, index, common.HexToAddress(destAddr), category == pb.IBTP_REQUEST, bizCallData)
+		tx, txErr = c.session.InvokeInterchain(srcChainServiceID, index, common.HexToAddress(destAddr), reqType, bizCallData)
 		if txErr != nil {
 			logger.Info("Call InvokeInterchain failed",
-				"srcChainMethod", srcChainMethod,
+				"srcChainServiceID", srcChainServiceID,
 				"index", fmt.Sprintf("%d", index),
 				"destAddr", destAddr,
 				"error", txErr.Error(),
@@ -284,14 +320,14 @@ func (c *Client) InvokeInterchain(srcChainMethod string, index uint64, destAddr 
 	return c.waitForConfirmed(tx.Hash()), nil
 }
 
-func (c *Client) InvokeIndexUpdateWithError(srcChainMethod string, index uint64, category pb.IBTP_Category, errMsg string) (bool, error) {
+func (c *Client) InvokeIndexUpdateWithError(srcChainServiceID string, index uint64, dstServiceID string, reqType uint64, errMsg string) (bool, error) {
 	var tx *types.Transaction
 	var txErr error
 	if err := retry.Retry(func(attempt uint) error {
-		tx, txErr = c.session.InvokeIndexUpdateWithError(srcChainMethod, index, category == pb.IBTP_REQUEST, errMsg)
+		tx, txErr = c.session.InvokeIndexUpdateWithError(srcChainServiceID, index, common.HexToAddress(dstServiceID), reqType, errMsg)
 		if txErr != nil {
 			logger.Info("Call InvokeIndexUpdateWithError failed",
-				"srcChainMethod", srcChainMethod,
+				"srcChainServiceID", srcChainServiceID,
 				"index", fmt.Sprintf("%d", index),
 				"error", txErr.Error(),
 			)
@@ -307,16 +343,16 @@ func (c *Client) InvokeIndexUpdateWithError(srcChainMethod string, index uint64,
 	return receipt.Status == types.ReceiptStatusSuccessful, nil
 }
 
-func (c *Client) InvokeIndexUpdate(srcChainID string, index uint64, category pb.IBTP_Category) (bool, error) {
-	return c.InvokeIndexUpdateWithError(srcChainID, index, category, "")
+func (c *Client) InvokeIndexUpdate(srcChainID string, index uint64, dstServiceID string, reqType uint64) (bool, error) {
+	return c.InvokeIndexUpdateWithError(srcChainID, index, dstServiceID, reqType, "")
 }
 
 // GetOutMessage gets crosschain tx by `to` address and index
-func (c *Client) GetOutMessage(to string, idx uint64) (*pb.IBTP, error) {
+func (c *Client) GetOutMessage(servicePair string, idx uint64) (*pb.IBTP, error) {
 	var blockNum *big.Int
 	if err := retry.Retry(func(attempt uint) error {
 		var err error
-		blockNum, err = c.session.GetOutMessage(to, idx)
+		blockNum, err = c.session.GetOutMessage(servicePair, idx)
 		if err != nil {
 			logger.Error("get out message", "err", err.Error())
 		}
@@ -342,14 +378,22 @@ func (c *Client) GetOutMessage(to string, idx uint64) (*pb.IBTP, error) {
 		logger.Error("retry failed", "err", err.Error())
 	}
 
+	srcService, dstService, err := parseServicePair(servicePair)
+	if err != nil {
+		return nil, err
+	}
+
 	for throwEvents.Next() {
 		ev := throwEvents.Event
-		if string(bitxid.DID(ev.DestDID).GetChainDID()) == to && ev.Index == idx {
-			return Convert2IBTP(ev, c.appchainID, pb.IBTP_INTERCHAIN), nil
+		logger.Info("throw event", "SrcFullID", ev.SrcFullID, "DstFullID", ev.DstFullID, "index", ev.Index)
+		logger.Info("exp event", "srcService", srcService, "dstService", dstService, "idx", idx)
+
+		if ev.SrcFullID == srcService && ev.DstFullID == dstService && ev.Index == idx {
+			return Convert2IBTP(ev, int64(c.config.Ether.TimeoutHeight), pb.IBTP_INTERCHAIN), nil
 		}
 	}
 
-	return nil, fmt.Errorf("cannot find out ibtp for to %s and index %d", to, idx)
+	return nil, fmt.Errorf("cannot find out ibtp for service pair %s and index %d", servicePair, idx)
 }
 
 func (c *Client) getMeta(getMetaFunc func() ([]string, []uint64, error)) (map[string]uint64, error) {
@@ -423,25 +467,49 @@ func (c *Client) RollbackIBTP(ibtp *pb.IBTP, isSrcChain bool) (*pb.RollbackIBTPR
 		return ret, fmt.Errorf("ibtp content unmarshal: %w", err)
 	}
 
-	// only support rollback for interchainCharge
-	if content.Func != "interchainCharge" {
+	if content.Rollback == "" {
 		return nil, nil
 	}
 
-	var bizData []byte
-	var err error
-	bAbi, ok := c.bizABI[strings.ToLower(content.SrcContractId)]
-	if !ok {
-		ret.Message = fmt.Sprintf("no abi for contract %s", content.SrcContractId)
+	var (
+		bizData           []byte
+		err               error
+		serviceID         string
+		srcChainServiceID string
+		ok                bool
+		bAbi              *abi.ABI
+		rollbackFunc      string
+		rollbackArgs      [][]byte
+		reqType           uint64
+	)
+
+	if isSrcChain {
+		rollbackFunc = content.Rollback
+		rollbackArgs = content.ArgsRb
+		srcChainServiceID = ibtp.To
+		_, _, serviceID, err = parseChainServiceID(ibtp.From)
+		reqType = 1
 	} else {
-		bizData, err = c.packFuncArgs(content.Rollback, content.ArgsRb, bAbi)
+		rollbackFunc = content.Func
+		rollbackArgs = content.Args
+		rollbackArgs[len(rollbackArgs)-1] = []byte("true")
+		srcChainServiceID = ibtp.From
+		_, _, serviceID, err = parseChainServiceID(ibtp.To)
+		reqType = 2
+	}
+
+	bAbi, ok = c.bizABI[strings.ToLower(serviceID)]
+	if !ok {
+		ret.Message = fmt.Sprintf("no abi for contract %s", serviceID)
+	} else {
+		bizData, err = c.packFuncArgs(rollbackFunc, rollbackArgs, bAbi)
 		if err != nil {
 			ret.Message = fmt.Sprintf("pack for ibtp %s func %s and args: %s", ibtp.ID(), content.Func, err)
 		}
 	}
 
 	// false indicates it is for rollback
-	tx, err := c.session.InvokeInterchain(ibtp.To, ibtp.Index, common.HexToAddress(content.SrcContractId), false, bizData)
+	tx, err := c.session.InvokeInterchain(srcChainServiceID, ibtp.Index, common.HexToAddress(serviceID), reqType, bizData)
 	if err != nil {
 		return nil, err
 	}
@@ -460,7 +528,11 @@ func (c *Client) IncreaseInMeta(original *pb.IBTP) (*pb.IBTP, error) {
 		return nil, err
 	}
 	errMsg := "ibtp failed in bitxhub"
-	success, err := c.InvokeIndexUpdateWithError(original.From, original.Index, original.Category(), errMsg)
+	_, _, serviceID, err := parseChainServiceID(ibtp.To)
+	if err != nil {
+		return nil, err
+	}
+	success, err := c.InvokeIndexUpdateWithError(original.From, original.Index, serviceID, 0, errMsg)
 	if err != nil {
 		logger.Error(errMsg, "ibtp_id", ibtp.ID(), "error", err.Error())
 		return nil, err
@@ -533,7 +605,7 @@ func (c *Client) waitForConfirmed(hash common.Hash) *types.Receipt {
 }
 
 func (c *Client) GetReceipt(ibtp *pb.IBTP) (*pb.IBTP, error) {
-	blockBytes, err := c.GetInMessage(ibtp.From, ibtp.Index)
+	blockBytes, err := c.GetInMessage(ibtp.ServicePair(), ibtp.Index)
 	if err != nil {
 		return nil, err
 	}
@@ -560,12 +632,17 @@ func (c *Client) GetReceipt(ibtp *pb.IBTP) (*pb.IBTP, error) {
 		return nil, err
 	}
 
-	bAbi, ok := c.bizABI[strings.ToLower(ct.DstContractId)]
+	_, _, serviceID, err := parseChainServiceID(ibtp.To)
+	if err != nil {
+		return nil, err
+	}
+
+	bAbi, ok := c.bizABI[strings.ToLower(serviceID)]
 	if !ok {
-		return nil, fmt.Errorf("can not find abi for contract %s", ct.DstContractId)
+		return nil, fmt.Errorf("can not find abi for contract %s", serviceID)
 	}
 	bizData, err := c.packFuncArgs(ct.Func, ct.Args, bAbi)
-	packData, err := c.abi.Pack(InvokeInterchain, ibtp.From, ibtp.Index, common.HexToAddress(ct.DstContractId), ibtp.Category() == pb.IBTP_REQUEST, bizData)
+	packData, err := c.abi.Pack(InvokeInterchain, ibtp.From, ibtp.Index, common.HexToAddress(serviceID), uint64(ibtp.Category()), bizData)
 	if err != nil {
 		return nil, err
 	}
@@ -586,6 +663,44 @@ func (c *Client) GetReceipt(ibtp *pb.IBTP) (*pb.IBTP, error) {
 	}
 
 	return c.generateCallback(ibtp, nil, false)
+}
+
+func (c *Client) GetSrcRollbackMeta() (map[string]uint64, error) {
+	panic("implement me")
+}
+
+func (c *Client) GetDstRollbackMeta() (map[string]uint64, error) {
+	return c.getMeta(c.session.GetDstRollbackMeta)
+}
+
+func (c *Client) GetChainID() (string, string) {
+	var (
+		bxhID      string
+		appchainID string
+		err        error
+	)
+	if err := retry.Retry(func(attempt uint) error {
+		bxhID, appchainID, err = c.session.GetChainID()
+		if err != nil {
+			return err
+		}
+
+		return nil
+	}, strategy.Wait(2*time.Second)); err != nil {
+		logger.Error("Can't get chain ID", "error", err)
+	}
+
+	return bxhID, appchainID
+}
+
+func (c *Client) GetServices() []string {
+	var services []string
+
+	for _, service := range c.config.Services {
+		services = append(services, service.ID)
+	}
+
+	return services
 }
 
 func (c *Client) packFuncArgs(function string, args [][]byte, abi *abi.ABI) ([]byte, error) {
@@ -619,4 +734,22 @@ func main() {
 	})
 
 	logger.Info("Plugin server down")
+}
+
+func parseChainServiceID(id string) (string, string, string, error) {
+	splits := strings.Split(id, ":")
+	if len(splits) != 3 {
+		return "", "", "", fmt.Errorf("invalid chain service ID: %s", id)
+	}
+
+	return splits[0], splits[1], splits[2], nil
+}
+
+func parseServicePair(servicePair string) (string, string, error) {
+	splits := strings.Split(servicePair, "-")
+	if len(splits) != 2 {
+		return "", "", fmt.Errorf("invalid service pair: %s", servicePair)
+	}
+
+	return splits[0], splits[1], nil
 }
