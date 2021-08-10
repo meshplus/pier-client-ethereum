@@ -174,7 +174,7 @@ func (c *Client) GetIBTP() chan *pb.IBTP {
 // the function inside the ibtp. If any execution results returned, pass
 // them to other modules.
 func (c *Client) SubmitIBTP(ibtp *pb.IBTP) (*pb.SubmitIBTPResponse, error) {
-	ret := &pb.SubmitIBTPResponse{}
+	ret := &pb.SubmitIBTPResponse{Status: true}
 	pd := &pb.Payload{}
 	if err := pd.Unmarshal(ibtp.Payload); err != nil {
 		return nil, fmt.Errorf("ibtp payload unmarshal: %w", err)
@@ -457,7 +457,7 @@ func (c *Client) CommitCallback(ibtp *pb.IBTP) error {
 
 // @ibtp is the original ibtp merged from this appchain
 func (c *Client) RollbackIBTP(ibtp *pb.IBTP, isSrcChain bool) (*pb.RollbackIBTPResponse, error) {
-	ret := &pb.RollbackIBTPResponse{}
+	ret := &pb.RollbackIBTPResponse{Status: true}
 	pd := &pb.Payload{}
 	if err := pd.Unmarshal(ibtp.Payload); err != nil {
 		return nil, fmt.Errorf("ibtp payload unmarshal: %w", err)
@@ -468,7 +468,8 @@ func (c *Client) RollbackIBTP(ibtp *pb.IBTP, isSrcChain bool) (*pb.RollbackIBTPR
 	}
 
 	if content.Rollback == "" {
-		return nil, nil
+		logger.Info("rollback function is empty, ignore it", "func", content.Func, "callback", content.Callback, "rollback", content.Rollback)
+		return ret, nil
 	}
 
 	var (
@@ -498,7 +499,7 @@ func (c *Client) RollbackIBTP(ibtp *pb.IBTP, isSrcChain bool) (*pb.RollbackIBTPR
 		reqType = 2
 	}
 
-	bAbi, ok = c.bizABI[strings.ToLower(serviceID)]
+	bAbi, ok = c.bizABI[serviceID]
 	if !ok {
 		ret.Message = fmt.Sprintf("no abi for contract %s", serviceID)
 	} else {
@@ -508,15 +509,30 @@ func (c *Client) RollbackIBTP(ibtp *pb.IBTP, isSrcChain bool) (*pb.RollbackIBTPR
 		}
 	}
 
-	// false indicates it is for rollback
-	tx, err := c.session.InvokeInterchain(srcChainServiceID, ibtp.Index, common.HexToAddress(serviceID), reqType, bizData)
-	if err != nil {
-		return nil, err
+	logger.Info("rollback ibtp", "from", srcChainServiceID, "to", serviceID, "index", ibtp.Index, "func", rollbackFunc)
+	for i, arg := range rollbackArgs {
+		logger.Info("arg", strconv.Itoa(i), string(arg))
 	}
-	receipt := c.waitForConfirmed(tx.Hash())
-	if len(receipt.Logs) == 0 {
+
+	if !ok || err != nil {
 		ret.Status = false
-		ret.Message = "wrong contract doesn't emit log event"
+		success, err := c.InvokeIndexUpdateWithError(srcChainServiceID, ibtp.Index, serviceID, reqType, ret.Message)
+		if err != nil {
+			return nil, err
+		}
+		if !success {
+			return nil, fmt.Errorf("update index for ibtp %s failed", ibtp.ID())
+		}
+	} else {
+		// false indicates it is for rollback
+		receipt, err := c.InvokeInterchain(srcChainServiceID, ibtp.Index, serviceID, reqType, bizData)
+		if err != nil {
+			return nil, err
+		}
+		if len(receipt.Logs) == 0 {
+			ret.Status = false
+			ret.Message = "wrong contract doesn't emit log event"
+		}
 	}
 
 	return ret, nil
@@ -637,7 +653,7 @@ func (c *Client) GetReceipt(ibtp *pb.IBTP) (*pb.IBTP, error) {
 		return nil, err
 	}
 
-	bAbi, ok := c.bizABI[strings.ToLower(serviceID)]
+	bAbi, ok := c.bizABI[serviceID]
 	if !ok {
 		return nil, fmt.Errorf("can not find abi for contract %s", serviceID)
 	}

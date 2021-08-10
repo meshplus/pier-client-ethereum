@@ -134,7 +134,7 @@ contract Broker {
         } else if (reqType == 2) {
             string memory inServicePair = genServicePair(srcChainServiceID, curServiceID);
             // invoke dst rollback
-            require(dstRollbackCounter[inServicePair] + 1 == index);
+            require(dstRollbackCounter[inServicePair] + 1 <= index);
             markDstRollbackCounter(inServicePair, index);
         }
     }
@@ -163,27 +163,28 @@ contract Broker {
         // Throw interchain event for listening of plugin.
         emit throwEvent(outCounter[outServicePair], destChainServiceID, curFullID, funcs, args, argscb, argsrb);
     }
+    
+    
 
     // The helper functions that help document Meta information.
-    function markCallbackCounter(string memory from, uint64 index) private {
-        if (callbackCounter[from] == 0) {
-            callbackServicePairs.push(from);
+    function markCallbackCounter(string memory servicePair, uint64 index) private {
+        if (callbackCounter[servicePair] == 0) {
+            callbackServicePairs.push(servicePair);
         }
-        callbackCounter[from] = index;
-        inMessages[from][callbackCounter[from]] = block.number;
+        callbackCounter[servicePair] = index;
     }
 
-    function markDstRollbackCounter(string memory from, uint64 index) private {
-        dstRollbackCounter[from] = index;
+    function markDstRollbackCounter(string memory servicePair, uint64 index) private {
+        dstRollbackCounter[servicePair] = index;
     }
 
-    function markInCounter(string memory from) private {
-        inCounter[from]++;
-        if (inCounter[from] == 1) {
-            inServicePairs.push(from);
+    function markInCounter(string memory servicePair) private {
+        inCounter[servicePair]++;
+        if (inCounter[servicePair] == 1) {
+            inServicePairs.push(servicePair);
         }
 
-        inMessages[from][inCounter[from]] = block.number;
+        inMessages[servicePair][inCounter[servicePair]] = block.number;
     }
 
     // The helper functions that help plugin query.

@@ -29,5 +29,6 @@ peers = [
 ]
 
 [appchain]
+id = "ethchain"
 plugin = "eth-client.so"
 config = "ether"
