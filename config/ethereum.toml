@@ -6,7 +6,6 @@ key_path = "account.key"
 password = "password"
 min_confirm = 1
 timeout_height = 10
-chain_id = "1"
 
 [[services]]
 id = "0xBd0F020738f9ecbF447B040E211D2E10bF2264fe"

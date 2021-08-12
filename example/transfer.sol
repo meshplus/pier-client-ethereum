@@ -13,7 +13,7 @@ contract Transfer {
     }
 
     // contract for asset
-    function transfer(string memory destContractDID, string memory sender, string memory receiver, string memory amount) public {
+    function transfer(string memory destChainServiceID, string memory sender, string memory receiver, string memory amount) public {
         uint64 am = uint64(parseInt(amount));
         require(accountM[sender] >= am);
         accountM[sender] -= am;
@@ -29,7 +29,7 @@ contract Transfer {
         string memory argsRb = concat(toSlice(sender), toSlice(","));
         argsRb = concat(toSlice(argsRb), toSlice(amount));
 
-        broker.emitInterchainEvent(destContractDID, "interchainCharge,,interchainRollback", args, "", argsRb);
+        broker.emitInterchainEvent(destChainServiceID, "interchainCharge,,interchainRollback", args, "", argsRb);
     }
 
     function interchainRollback(string memory sender, uint64 val) public onlyBroker {

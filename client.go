@@ -87,10 +87,11 @@ func (c *Client) Initialize(configPath string, appchainID string, extra []byte) 
 		return err
 	}
 
-	chainID, ok := new(big.Int).SetString(cfg.Ether.ChainID, 10)
-	if !ok {
-		return fmt.Errorf("ethereum chain id is invalid: %s", cfg.Ether.ChainID)
+	chainID, err := etherCli.ChainID(context.TODO())
+	if err != nil {
+		return fmt.Errorf("cannot get ethereum chain ID: %sv", err)
 	}
+
 	// deploy a contract first
 	auth, err := bind.NewKeyedTransactorWithChainID(unlockedKey.PrivateKey, chainID)
 	if err != nil {
