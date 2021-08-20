@@ -6,14 +6,14 @@ contract Broker {
     mapping(address => int64) whiteList;
     address[] contracts;
     address[] admins;
+    string bxhID;
+    string appchainID;
 
-    event throwEvent(uint64 index, string destDID, address fid, string funcs, string args, string argscb, string argsrb);
-    event LogInterchainData(bool status, string data);
-    event LogInterchainStatus(bool status);
+    event throwEvent(uint64 index, string dstFullID, string srcFullID, string funcs, string args, string argscb, string argsrb);
 
-    string[] outChains;
-    string[] inChains;
-    string[] callbackChains;
+    string[] outServicePairs;
+    string[] inServicePairs;
+    string[] callbackServicePairs;
 
     mapping(string => uint64) outCounter; // mapping from contract address to out event last index
     mapping(string => mapping(uint64 => uint)) outMessages;
@@ -22,10 +22,11 @@ contract Broker {
     mapping(string => uint64) callbackCounter;
     mapping(string => mapping(uint64 => string)) invokeError;
     mapping(string => mapping(uint64 => string)) callbackError;
+    mapping(string => uint64) dstRollbackCounter;
 
     // Authority control. Contracts need to be registered.
     modifier onlyWhiteList {
-        require(whiteList[msg.sender]==1, "Invoker are not in white list");
+        require(whiteList[msg.sender] == 1, "Invoker are not in white list");
         _;
     }
 
@@ -33,28 +34,31 @@ contract Broker {
     modifier onlyAdmin {
         bool flag = false;
         for (uint i = 0; i < admins.length; i++) {
-            if (msg.sender == admins[i]) { flag = true; }
+            if (msg.sender == admins[i]) {flag = true;}
         }
-        if (flag) { revert(); }
+        if (flag) {revert();}
         _;
     }
 
     function initialize() public {
-        for (uint i = 0; i < inChains.length; i++) {
-            inCounter[inChains[i]] = 0;
+        for (uint i = 0; i < inServicePairs.length; i++) {
+            inCounter[inServicePairs[i]] = 0;
         }
-        for (uint i = 0; i < outChains.length; i++) {
-            outCounter[outChains[i]] = 0;
+        for (uint j = 0; j < outServicePairs.length; j++) {
+            outCounter[outServicePairs[j]] = 0;
         }
-        for (uint i = 0; i < callbackChains.length; i++) {
-            callbackCounter[callbackChains[i]] = 0;
+        for (uint k = 0; k < callbackServicePairs.length; k++) {
+            callbackCounter[callbackServicePairs[k]] = 0;
         }
-        for (uint i = 0; i < contracts.length; i++) {
-            whiteList[contracts[i]] = 0;
+        for (uint m = 0; m < inServicePairs.length; m++) {
+            dstRollbackCounter[inServicePairs[m]] = 0;
         }
-        delete outChains;
-        delete inChains;
-        delete callbackChains;
+        for (uint n = 0; n < contracts.length; n++) {
+            whiteList[contracts[n]] = 0;
+        }
+        delete outServicePairs;
+        delete inServicePairs;
+        delete callbackServicePairs;
     }
 
     // 0: auditting  1: approved  -1: refused
@@ -62,8 +66,8 @@ contract Broker {
         whiteList[addr] = 0;
     }
 
-    function audit(address addr, int64 status) public returns(bool) {
-        if (status != -1 && status != 0 && status != 1) { return false; }
+    function audit(address addr, int64 status) public returns (bool) {
+        if (status != - 1 && status != 0 && status != 1) {return false;}
         whiteList[addr] = status;
         // Only approved contracts can be recorded
         if (status == 1) {
@@ -72,9 +76,14 @@ contract Broker {
         return true;
     }
 
-    function invokeInterchain(string calldata srcChainMethod, uint64 index, address destAddr, bool req, bytes calldata bizCallData) payable external {
+    constructor(string memory _bxhID, string memory _appchainID) public {
+        bxhID = _bxhID;
+        appchainID = _appchainID;
+    }
+
+    function invokeInterchain(string calldata srcChainServiceID, uint64 index, address destAddr, uint64 reqType, bytes calldata bizCallData) payable external {
         require(whiteList[destAddr] == 1);
-        invokeIndexUpdate(srcChainMethod, index, req, "");
+        invokeIndexUpdate(srcChainServiceID, index, destAddr, reqType, "");
 
         assembly {
             let ptr := mload(0x40)
@@ -104,133 +113,157 @@ contract Broker {
         }
     }
 
-    function invokeIndexUpdate(string memory srcChainMethod, uint64 index, bool req, string memory err) private {
-        if (req) {
-            require(inCounter[srcChainMethod] + 1 == index);
-            markInCounter(srcChainMethod);
+    function invokeIndexUpdate(string memory srcChainServiceID, uint64 index, address destAddr, uint64 reqType, string memory err) private {
+        string memory curServiceID = genFullServiceID(addressToString(destAddr));
+
+        if (reqType == 0) {
+            string memory inServicePair = genServicePair(srcChainServiceID, curServiceID);
+            require(inCounter[inServicePair] + 1 == index);
+            markInCounter(inServicePair);
             if (keccak256(abi.encodePacked(err)) != keccak256(abi.encodePacked(""))) {
-                invokeError[srcChainMethod][index] = err;
+                invokeError[inServicePair][index] = err;
             }
-        } else {
-            // invoke callback or rollback
-            require(callbackCounter[srcChainMethod] + 1 == index);
-            markCallbackCounter(srcChainMethod, index);
+        } else if (reqType == 1) {
+            string memory outServicePair = genServicePair(curServiceID, srcChainServiceID);
+            // invoke src callback or rollback
+            require(callbackCounter[outServicePair] + 1 == index);
+            markCallbackCounter(outServicePair, index);
             if (keccak256(abi.encodePacked(err)) != keccak256(abi.encodePacked(""))) {
-                callbackError[srcChainMethod][index] = err;
+                callbackError[outServicePair][index] = err;
             }
+        } else if (reqType == 2) {
+            string memory inServicePair = genServicePair(srcChainServiceID, curServiceID);
+            // invoke dst rollback
+            require(dstRollbackCounter[inServicePair] + 1 <= index);
+            markDstRollbackCounter(inServicePair, index);
         }
     }
 
-    function invokeIndexUpdateWithError(string memory srcChainMethod, uint64 index, bool req, string memory err) public {
-        invokeIndexUpdate(srcChainMethod, index, req, err);
+    function invokeIndexUpdateWithError(string memory srcChainServiceID, uint64 index, address destAddr, uint64 reqType, string memory err) public {
+        invokeIndexUpdate(srcChainServiceID, index, destAddr, reqType, err);
     }
 
     function emitInterchainEvent(
-        string memory destContractDID,
+        string memory destChainServiceID,
         string memory funcs,
         string memory args,
         string memory argscb,
         string memory argsrb)
     public onlyWhiteList {
+        string memory curFullID = genFullServiceID(addressToString(msg.sender));
+        string memory outServicePair = genServicePair(curFullID, destChainServiceID);
+
         // Record the order of interchain contract which has been started.
-        string memory destChainMethod = parseMethod(destContractDID);
-        outCounter[destChainMethod]++;
-        if (outCounter[destChainMethod] == 1) {
-            outChains.push(destChainMethod);
+        outCounter[outServicePair]++;
+        if (outCounter[outServicePair] == 1) {
+            outServicePairs.push(outServicePair);
         }
-        outMessages[destChainMethod][outCounter[destChainMethod]] = block.number;
+        outMessages[outServicePair][outCounter[outServicePair]] = block.number;
 
         // Throw interchain event for listening of plugin.
-        emit throwEvent(outCounter[destChainMethod], destContractDID, msg.sender, funcs, args, argscb, argsrb);
+        emit throwEvent(outCounter[outServicePair], destChainServiceID, curFullID, funcs, args, argscb, argsrb);
     }
+    
+    
 
     // The helper functions that help document Meta information.
-    function markCallbackCounter(string memory from, uint64 index) private {
-        if (callbackCounter[from] == 0) {
-            callbackChains.push(from);
+    function markCallbackCounter(string memory servicePair, uint64 index) private {
+        if (callbackCounter[servicePair] == 0) {
+            callbackServicePairs.push(servicePair);
         }
-        callbackCounter[from] = index;
-        inMessages[from][callbackCounter[from]] = block.number;
+        callbackCounter[servicePair] = index;
     }
 
-    function markInCounter(string memory from) private {
-        inCounter[from]++;
-        if (inCounter[from] == 1) {
-            inChains.push(from);
+    function markDstRollbackCounter(string memory servicePair, uint64 index) private {
+        dstRollbackCounter[servicePair] = index;
+    }
+
+    function markInCounter(string memory servicePair) private {
+        inCounter[servicePair]++;
+        if (inCounter[servicePair] == 1) {
+            inServicePairs.push(servicePair);
         }
 
-        inMessages[from][inCounter[from]] = block.number;
+        inMessages[servicePair][inCounter[servicePair]] = block.number;
     }
 
     // The helper functions that help plugin query.
-    function getOuterMeta() public view returns(string[] memory, uint64[] memory) {
-        uint64[] memory indices = new uint64[](outChains.length);
-        for (uint64 i = 0; i < outChains.length; i++) {
-            indices[i] = outCounter[outChains[i]];
+    function getOuterMeta() public view returns (string[] memory, uint64[] memory) {
+        uint64[] memory indices = new uint64[](outServicePairs.length);
+        for (uint64 i = 0; i < outServicePairs.length; i++) {
+            indices[i] = outCounter[outServicePairs[i]];
         }
 
-        return (outChains, indices);
+        return (outServicePairs, indices);
     }
 
-    function getOutMessage(string memory to, uint64 idx) public view returns (uint) {
-        validDID(to);
-        return outMessages[to][idx];
+    function getOutMessage(string memory outServicePair, uint64 idx) public view returns (uint) {
+        return outMessages[outServicePair][idx];
     }
 
-    function getInMessage(string memory from, uint64 idx) public view returns (uint)  {
-        validDID(from);
-        return inMessages[from][idx];
+    function getInMessage(string memory inServicePair, uint64 idx) public view returns (uint)  {
+        return inMessages[inServicePair][idx];
     }
 
     function getInnerMeta() public view returns (string[] memory, uint64[] memory) {
-        uint64[] memory indices = new uint64[](inChains.length);
-        for (uint i = 0; i < inChains.length; i++) {
-            indices[i] = inCounter[inChains[i]];
+        uint64[] memory indices = new uint64[](inServicePairs.length);
+        for (uint i = 0; i < inServicePairs.length; i++) {
+            indices[i] = inCounter[inServicePairs[i]];
         }
 
-        return (inChains, indices);
+        return (inServicePairs, indices);
     }
 
     function getCallbackMeta() public view returns (string[] memory, uint64[] memory) {
-        uint64[] memory indices = new uint64[](callbackChains.length);
-        for (uint64 i = 0; i < callbackChains.length; i++) {
-            indices[i] = callbackCounter[callbackChains[i]];
+        uint64[] memory indices = new uint64[](callbackServicePairs.length);
+        for (uint64 i = 0; i < callbackServicePairs.length; i++) {
+            indices[i] = callbackCounter[callbackServicePairs[i]];
         }
 
-        return (callbackChains, indices);
+        return (callbackServicePairs, indices);
     }
 
-    function validDID(string memory did) internal pure {
-        string[] memory splitArr = split(did, ":");
-        require(splitArr.length==4, "did is not in four part");
-        require(compareStrings(splitArr[0], "did"), "prefix is not did");
-        for (uint256 i=1;i<4;i++) {
-            bytes memory tmp = bytes(splitArr[i]);
-            require(tmp.length!=0, "did subset is empty");
-        }
-    }
-
-    function parseMethod(string memory did) internal pure returns(string memory) {
-        string[] memory splitArr = split(did, ":");
-        // check did format
-        require(splitArr.length==4, "did is not legal format");
-        require(compareStrings(splitArr[0], "did"), "did is not legal format");
-        for (uint256 i=1;i<4;i++) {
-            bytes memory tmp = bytes(splitArr[i]);
-            require(tmp.length!=0, "did subset is empty");
+    function getDstRollbackMeta() public view returns(string[] memory, uint64[] memory) {
+        uint64[] memory indices = new uint64[](inServicePairs.length);
+        for (uint i = 0; i < inServicePairs.length; i++) {
+            indices[i] = dstRollbackCounter[inServicePairs[i]];
         }
 
-        string memory method = concat(toSlice(splitArr[0]), toSlice(":"));
-        method = concat(toSlice(method), toSlice(splitArr[1]));
-        method = concat(toSlice(method), toSlice(":"));
-        method = concat(toSlice(method), toSlice(splitArr[2]));
-        method = concat(toSlice(method), toSlice(":"));
-        method = concat(toSlice(method), toSlice("."));
-        return method;
+        return (inServicePairs, indices);
     }
 
-    function compareStrings(string memory a, string memory b) public pure returns (bool) {
-        return (keccak256(abi.encodePacked((a))) == keccak256(abi.encodePacked((b))));
+    function genFullServiceID(string memory serviceID) public view returns (string memory) {
+        string memory fullID = concat(toSlice(bxhID), toSlice(":"));
+        fullID = concat(toSlice(fullID), toSlice(appchainID));
+        fullID = concat(toSlice(fullID), toSlice(":"));
+        fullID = concat(toSlice(fullID), toSlice(serviceID));
+        return fullID;
+    }
+
+    function genServicePair(string memory from, string memory to) internal pure returns (string memory) {
+        string memory servicePair = concat(toSlice(from), toSlice("-"));
+        servicePair = concat(toSlice(servicePair), toSlice(to));
+
+        return servicePair;
+    }
+
+    function getChainID() public view returns (string memory, string memory) {
+        return (bxhID, appchainID);
+    }
+
+    function _indexOf(string memory _base, string memory _value, uint _offset) internal pure returns (int) {
+        bytes memory _baseBytes = bytes(_base);
+        bytes memory _valueBytes = bytes(_value);
+
+        assert(_valueBytes.length == 1);
+
+        for (uint i = _offset; i < _baseBytes.length; i++) {
+            if (_baseBytes[i] == _valueBytes[0]) {
+                return int(i);
+            }
+        }
+
+        return - 1;
     }
 
     struct slice {
@@ -274,56 +307,144 @@ contract Broker {
         }
     }
 
-    function split(string memory _base, string memory _delimiter) internal pure returns (string[] memory splitArr) {
-        bytes memory _baseBytes = bytes(_base);
+    // function addressToString(address x) internal pure returns (string memory) {
+    //     bytes memory s = new bytes(40);
+    //     for (uint i = 0; i < 20; i++) {
+    //         bytes1 b = bytes1(uint8(uint(uint160(x)) / (2**(8*(19 - i)))));
+    //         bytes1 hi = bytes1(uint8(b) / 16);
+    //         bytes1 lo = bytes1(uint8(b) - 16 * uint8(hi));
+    //         s[2*i] = char(hi);
+    //         s[2*i+1] = char(lo);
+    //     }
+    //     return string(s);
+    // }
+    
+    
+  function _getAsciiOffset(
+    uint8 nibble, bool caps
+  ) internal pure returns (uint8 offset) {
+    // to convert to ascii characters, add 48 to 0-9, 55 to A-F, & 87 to a-f.
+    if (nibble < 10) {
+      offset = 48;
+    } else if (caps) {
+      offset = 55;
+    } else {
+      offset = 87;
+    }
+  }
+    
+    function addressToString(
+    address account
+  ) public pure returns (string memory asciiString) {
+    // convert the account argument from address to bytes.
+    bytes20 data = bytes20(account);
 
-        uint _offset = 0;
-        uint _splitsCount = 1;
-        while (_offset < _baseBytes.length - 1) {
-            int _limit = _indexOf(_base, _delimiter, _offset);
-            if (_limit == - 1)
-                break;
-            else {
-                _splitsCount++;
-                _offset = uint(_limit) + 1;
-            }
-        }
+    // create an in-memory fixed-size bytes array.
+    bytes memory asciiBytes = new bytes(40);
 
-        splitArr = new string[](_splitsCount);
+    // declare variable types.
+    uint8 b;
+    uint8 leftNibble;
+    uint8 rightNibble;
+    bool leftCaps;
+    bool rightCaps;
+    uint8 asciiOffset;
 
-        _offset = 0;
-        _splitsCount = 0;
-        while (_offset <= _baseBytes.length - 1) {
-            int _limit = _indexOf(_base, _delimiter, _offset);
-            if (_limit == - 1) {
-                _limit = int(_baseBytes.length);
-            }
+    // get the capitalized characters in the actual checksum.
+    bool[40] memory caps = _toChecksumCapsFlags(account);
 
-            string memory _tmp = new string(uint(_limit) - _offset);
-            bytes memory _tmpBytes = bytes(_tmp);
+    // iterate over bytes, processing left and right nibble in each iteration.
+    for (uint256 i = 0; i < data.length; i++) {
+      // locate the byte and extract each nibble.
+      b = uint8(uint160(data) / (2**(8*(19 - i))));
+      leftNibble = b / 16;
+      rightNibble = b - 16 * leftNibble;
 
-            uint j = 0;
-            for (uint i = _offset; i < uint(_limit); i++) {
-                _tmpBytes[j++] = _baseBytes[i];
-            }
-            _offset = uint(_limit) + 1;
-            splitArr[_splitsCount++] = string(_tmpBytes);
-        }
-        return splitArr;
+      // locate and extract each capitalization status.
+      leftCaps = caps[2*i];
+      rightCaps = caps[2*i + 1];
+
+      // get the offset from nibble value to ascii character for left nibble.
+      asciiOffset = _getAsciiOffset(leftNibble, leftCaps);
+
+      // add the converted character to the byte array.
+      asciiBytes[2 * i] = byte(leftNibble + asciiOffset);
+
+      // get the offset from nibble value to ascii character for right nibble.
+      asciiOffset = _getAsciiOffset(rightNibble, rightCaps);
+
+      // add the converted character to the byte array.
+      asciiBytes[2 * i + 1] = byte(rightNibble + asciiOffset);
     }
 
-    function _indexOf(string memory _base, string memory _value, uint _offset) internal pure returns (int) {
-        bytes memory _baseBytes = bytes(_base);
-        bytes memory _valueBytes = bytes(_value);
+   
+    return concat(toSlice("0x"), toSlice(string(asciiBytes)));
+  }
 
-        assert(_valueBytes.length == 1);
+  function _toChecksumCapsFlags(address account) internal pure returns (
+    bool[40] memory characterCapitalized
+  ) {
+    // convert the address to bytes.
+    bytes20 a = bytes20(account);
 
-        for (uint i = _offset; i < _baseBytes.length; i++) {
-            if (_baseBytes[i] == _valueBytes[0]) {
-                return int(i);
-            }
-        }
+    // hash the address (used to calculate checksum).
+    bytes32 b = keccak256(abi.encodePacked(_toAsciiString(a)));
 
-        return -1;
+    // declare variable types.
+    uint8 leftNibbleAddress;
+    uint8 rightNibbleAddress;
+    uint8 leftNibbleHash;
+    uint8 rightNibbleHash;
+
+    // iterate over bytes, processing left and right nibble in each iteration.
+    for (uint256 i; i < a.length; i++) {
+      // locate the byte and extract each nibble for the address and the hash.
+      rightNibbleAddress = uint8(a[i]) % 16;
+      leftNibbleAddress = (uint8(a[i]) - rightNibbleAddress) / 16;
+      rightNibbleHash = uint8(b[i]) % 16;
+      leftNibbleHash = (uint8(b[i]) - rightNibbleHash) / 16;
+
+      characterCapitalized[2 * i] = (
+        leftNibbleAddress > 9 &&
+        leftNibbleHash > 7
+      );
+      characterCapitalized[2 * i + 1] = (
+        rightNibbleAddress > 9 &&
+        rightNibbleHash > 7
+      );
+    }
+  }
+  
+  // based on https://ethereum.stackexchange.com/a/56499/48410
+  function _toAsciiString(
+    bytes20 data
+  ) internal pure returns (string memory asciiString) {
+    // create an in-memory fixed-size bytes array.
+    bytes memory asciiBytes = new bytes(40);
+
+    // declare variable types.
+    uint8 b;
+    uint8 leftNibble;
+    uint8 rightNibble;
+
+    // iterate over bytes, processing left and right nibble in each iteration.
+    for (uint256 i = 0; i < data.length; i++) {
+      // locate the byte and extract each nibble.
+      b = uint8(uint160(data) / (2 ** (8 * (19 - i))));
+      leftNibble = b / 16;
+      rightNibble = b - 16 * leftNibble;
+
+      // to convert to ascii characters, add 48 to 0-9 and 87 to a-f.
+      asciiBytes[2 * i] = byte(leftNibble + (leftNibble < 10 ? 48 : 87));
+      asciiBytes[2 * i + 1] = byte(rightNibble + (rightNibble < 10 ? 48 : 87));
+    }
+
+    return string(asciiBytes);
+  }
+
+
+    function char(bytes1 b) internal pure returns (bytes1 c) {
+        if (uint8(b) < 10) return bytes1(uint8(b) + 0x30);
+        else return bytes1(uint8(b) + 0x57);
     }
 }

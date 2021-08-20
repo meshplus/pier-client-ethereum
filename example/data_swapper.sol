@@ -17,8 +17,8 @@ contract DataSwapper {
         return dataM[key];
     }
 
-    function get(string memory destContractDID, string memory key) public {
-        broker.emitInterchainEvent(destContractDID, "interchainGet,interchainSet,", key, key, "");
+    function get(string memory destChainServiceID, string memory key) public {
+        broker.emitInterchainEvent(destChainServiceID, "interchainGet,interchainSet,", key, key, "");
     }
 
     function set(string memory key, string memory value) public {
@@ -34,11 +34,11 @@ contract DataSwapper {
     }
 }
 
-abstract contract Broker {
+contract Broker {
     function emitInterchainEvent(
-        string memory destContractDID,
+        string memory destChainServiceID,
         string memory funcs,
         string memory args,
-        string memory argscb,
-        string memory argsrb) virtual public;
+        string memory argsCb,
+        string memory argsRb) public;
 }

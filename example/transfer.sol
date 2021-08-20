@@ -3,7 +3,7 @@ pragma solidity >=0.5.6;
 contract Transfer {
     mapping(string => uint64) accountM; // map for accounts
     // change the address of Broker accordingly
-    address BrokerAddr = 0x97135d4d2578dd2347FF5382db77553bE50bff3f;
+    address BrokerAddr = 0xBdFBFBB88348dd577C07F6C8E35B626274251913;
     Broker broker = Broker(BrokerAddr);
 
     // AccessControl
@@ -13,7 +13,7 @@ contract Transfer {
     }
 
     // contract for asset
-    function transfer(string memory destContractDID, string memory sender, string memory receiver, string memory amount) public {
+    function transfer(string memory destChainServiceID, string memory sender, string memory receiver, string memory amount) public {
         uint64 am = uint64(parseInt(amount));
         require(accountM[sender] >= am);
         accountM[sender] -= am;
@@ -23,19 +23,25 @@ contract Transfer {
         args = concat(toSlice(args), toSlice(receiver));
         args = concat(toSlice(args), toSlice(","));
         args = concat(toSlice(args), toSlice(amount));
+        args = concat(toSlice(args), toSlice(","));
+        args = concat(toSlice(args), toSlice("false"));
 
         string memory argsRb = concat(toSlice(sender), toSlice(","));
         argsRb = concat(toSlice(argsRb), toSlice(amount));
 
-        broker.emitInterchainEvent(destContractDID, "interchainCharge,,interchainRollback", args, "", argsRb);
+        broker.emitInterchainEvent(destChainServiceID, "interchainCharge,,interchainRollback", args, "", argsRb);
     }
 
     function interchainRollback(string memory sender, uint64 val) public onlyBroker {
         accountM[sender] += val;
     }
 
-    function interchainCharge(string memory sender, string memory receiver, uint64 val) public onlyBroker returns(bool) {
-        accountM[receiver] += val;
+    function interchainCharge(string memory sender, string memory receiver, uint64 val, bool isRollback) public onlyBroker returns(bool) {
+        if (!isRollback) {
+            accountM[receiver] += val;
+        } else {
+            accountM[receiver] -= val;
+        }
         return true;
     }
 
@@ -101,7 +107,7 @@ contract Transfer {
 
 contract Broker {
     function emitInterchainEvent(
-        string memory destContractDID,
+        string memory destChainServiceID,
         string memory funcs,
         string memory args,
         string memory argsCb,
