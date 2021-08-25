@@ -425,7 +425,7 @@ func (c *Client) RollbackIBTP(ibtp *pb.IBTP, isSrcChain bool) (*pb.RollbackIBTPR
 
 	// only support rollback for interchainCharge
 	if content.Func != "interchainCharge" {
-		return nil, nil
+		return ret, nil
 	}
 
 	var bizData []byte
