@@ -23,7 +23,6 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/hashicorp/go-hclog"
-	"github.com/hashicorp/go-plugin"
 	"github.com/meshplus/bitxhub-model/pb"
 	"github.com/meshplus/bitxid"
 	"github.com/meshplus/pier-client-ethereum/solidity"
@@ -605,18 +604,4 @@ func (c *Client) packFuncArgs(function string, args [][]byte, abi *abi.ABI) ([]b
 	}
 
 	return packed, nil
-}
-
-func main() {
-	plugin.Serve(&plugin.ServeConfig{
-		HandshakeConfig: plugins.Handshake,
-		Plugins: map[string]plugin.Plugin{
-			plugins.PluginName: &plugins.AppchainGRPCPlugin{Impl: &Client{}},
-		},
-		Logger: logger,
-		// A non-nil value here enables gRPC serving for this plugin...
-		GRPCServer: plugin.DefaultGRPCServer,
-	})
-
-	logger.Info("Plugin server down")
 }
