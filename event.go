@@ -27,6 +27,9 @@ func Convert2IBTP(ev *BrokerThrowEvent, timeoutHeight int64, ibtpType pb.IBTP_Ty
 
 func handleArgs(args string) [][]byte {
 	argsBytes := make([][]byte, 0)
+	if len(args) == 0 {
+		return argsBytes
+	}
 	as := strings.Split(args, ",")
 	for _, a := range as {
 		argsBytes = append(argsBytes, []byte(a))
