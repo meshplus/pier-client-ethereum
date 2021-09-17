@@ -12,8 +12,7 @@ const (
 )
 
 type Config struct {
-	Ether    Ether     `toml:"ether" json:"ether"`
-	Services []Service `mapstructure:"services" json:"services"`
+	Ether Ether `toml:"ether" json:"ether"`
 }
 
 type Ether struct {

@@ -1,52 +1,51 @@
 package main
 
 import (
-	"fmt"
-	"strings"
+	"bytes"
 
-	"github.com/cloudflare/cfssl/log"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/meshplus/bitxhub-model/pb"
 )
 
-func Convert2IBTP(ev *BrokerThrowEvent, timeoutHeight int64, ibtpType pb.IBTP_Type) *pb.IBTP {
-	pd, err := encryptPayload(ev)
+func (c *Client) Convert2IBTP(ev *BrokerThrowInterchainEvent, timeoutHeight int64) (*pb.IBTP, error) {
+	fullEv, encrypt, err := c.fillInterchainEvent(ev)
 	if err != nil {
-		log.Fatalf("Get ibtp payload :%s", err)
+		return nil, err
+	}
+	pd, err := encodePayload(fullEv, encrypt)
+	if err != nil {
+		return nil, err
 	}
 
 	return &pb.IBTP{
 		From:          ev.SrcFullID,
 		To:            ev.DstFullID,
 		Index:         ev.Index,
-		Type:          ibtpType,
+		Type:          pb.IBTP_INTERCHAIN,
 		TimeoutHeight: timeoutHeight,
 		Proof:         []byte("1"),
 		Payload:       pd,
-	}
+	}, nil
 }
 
-func handleArgs(args string) [][]byte {
-	argsBytes := make([][]byte, 0)
-	as := strings.Split(args, ",")
-	for _, a := range as {
-		argsBytes = append(argsBytes, []byte(a))
+func (c *Client) Convert2Receipt(ev *BrokerThrowReceiptEvent) (*pb.IBTP, error) {
+	fullEv, encrypt, err := c.fillReceiptEvent(ev)
+	if err != nil {
+		return nil, err
 	}
-	return argsBytes
+
+	return generateReceipt(fullEv.SrcFullID, fullEv.DstFullID, fullEv.Index, fullEv.Result, fullEv.Status, encrypt)
 }
 
-func encryptPayload(ev *BrokerThrowEvent) ([]byte, error) {
-	funcs := strings.Split(ev.Funcs, ",")
-	if len(funcs) != 3 {
-		return nil, fmt.Errorf("expected 3 functions, cur: %s", ev.Funcs)
+func encodePayload(ev *BrokerThrowInterchainEvent, encrypt bool) ([]byte, error) {
+	var args [][]byte
+	for _, arg := range ev.Args {
+		args = append(args, []byte(arg))
 	}
-
 	content := &pb.Content{
-		Func:     funcs[0],
-		Args:     handleArgs(ev.Args),
-		Callback: funcs[1],
-		ArgsCb:   handleArgs(ev.Argscb),
-		Rollback: funcs[2],
-		ArgsRb:   handleArgs(ev.Argsrb),
+		Func: ev.Func,
+		Args: args,
 	}
 	data, err := content.Marshal()
 	if err != nil {
@@ -54,7 +53,60 @@ func encryptPayload(ev *BrokerThrowEvent) ([]byte, error) {
 	}
 
 	ibtppd := &pb.Payload{
-		Content: data,
+		Encrypted: encrypt,
+		Content:   data,
+		Hash:      ev.Hash[:],
 	}
 	return ibtppd.Marshal()
+}
+
+func (c *Client) fillInterchainEvent(ev *BrokerThrowInterchainEvent) (*BrokerThrowInterchainEvent, bool, error) {
+	if ev.Func == "" {
+		fun, args, encrypt, err := c.session.GetOutMessage(pb.GenServicePair(ev.SrcFullID, ev.DstFullID), ev.Index)
+		if err != nil {
+			return nil, false, err
+		}
+
+		ev.Func = fun
+		ev.Args = args
+		emptyHash := common.Hash{}
+
+		if bytes.Equal(ev.Hash[:], emptyHash[:]) {
+			var data []byte
+			data = append(data, []byte(fun)...)
+			for _, arg := range args {
+				data = append(data, []byte(arg)...)
+			}
+
+			ev.Hash = common.BytesToHash(crypto.Keccak256(data))
+		}
+
+		return ev, encrypt, nil
+	}
+
+	return ev, false, nil
+}
+
+func (c *Client) fillReceiptEvent(ev *BrokerThrowReceiptEvent) (*BrokerThrowReceiptEvent, bool, error) {
+	if ev.Result == nil {
+		result, status, encrypt, err := c.session.GetReceiptMessage(pb.GenServicePair(ev.SrcFullID, ev.DstFullID), ev.Index)
+		if err != nil {
+			return nil, false, err
+		}
+		ev.Result = result
+		ev.Status = status
+
+		emptyHash := common.Hash{}
+		if bytes.Equal(ev.Hash[:], emptyHash[:]) {
+			var packed []byte
+			for _, ele := range result {
+				packed = append(packed, ele...)
+			}
+			ev.Hash = common.BytesToHash(crypto.Keccak256(packed))
+		}
+
+		return ev, encrypt, nil
+	}
+
+	return ev, false, nil
 }
