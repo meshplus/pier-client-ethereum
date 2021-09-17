@@ -1,9 +1,10 @@
 pragma solidity >=0.5.6;
+pragma experimental ABIEncoderV2;
 
 contract DataSwapper {
     mapping(string => string) dataM; // map for accounts
     // change the address of Broker accordingly
-    address BrokerAddr = 0x97135d4d2578dd2347FF5382db77553bE50bff3f;
+    address BrokerAddr = 0x9d7745Ff99bF08F66664e1417104360b390b8D1e;
     Broker broker = Broker(BrokerAddr);
 
     // AccessControl
@@ -13,32 +14,50 @@ contract DataSwapper {
     }
 
     // contract for data exchange
-    function getData(string memory key) public returns(string memory) {
+    function getData(string memory key) public view returns(string memory) {
         return dataM[key];
     }
 
     function get(string memory destChainServiceID, string memory key) public {
-        broker.emitInterchainEvent(destChainServiceID, "interchainGet,interchainSet,", key, key, "");
+        bytes[] memory args = new bytes[](1);
+        args[0] = abi.encodePacked(key);
+        
+        bytes[] memory argsCb = new bytes[](1);
+        argsCb[0] = abi.encodePacked(key);
+
+        broker.emitInterchainEvent(destChainServiceID, "interchainGet", args, "interchainSet", argsCb, "", new bytes[](0), false);
     }
 
     function set(string memory key, string memory value) public {
         dataM[key] = value;
     }
 
-    function interchainSet(string memory key, string memory value) public onlyBroker {
+    function interchainSet(bytes[] memory args) public onlyBroker {
+        require(args.length == 2, "interchainSet args' length is not correct, expect 2");
+        string memory key = string(args[0]);
+        string memory value = string(args[1]);
         set(key, value);
     }
 
-    function interchainGet(string memory key) public onlyBroker returns(bool, string memory) {
-        return (true, dataM[key]);
+    function interchainGet(bytes[] memory args, bool isRollback) public onlyBroker returns(bytes[] memory) {
+        require(args.length == 1, "interchainGet args' length is not correct, expect 1");
+        string memory key = string(args[0]);
+        
+        bytes[] memory result = new bytes[](1);
+        result[0] = abi.encodePacked(dataM[key]);
+        
+        return result;
     }
 }
 
-contract Broker {
+abstract contract Broker {
     function emitInterchainEvent(
-        string memory destChainServiceID,
-        string memory funcs,
-        string memory args,
-        string memory argsCb,
-        string memory argsRb) public;
+        string memory destFullServiceID,
+        string memory func,
+        bytes[] memory args,
+        string memory funcCb,
+        bytes[] memory argsCb,
+        string memory funcRb,
+        bytes[] memory argsRb,
+        bool isEncrypt) public virtual;
 }

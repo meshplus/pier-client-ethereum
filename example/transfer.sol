@@ -1,9 +1,10 @@
 pragma solidity >=0.5.6;
+pragma experimental ABIEncoderV2;
 
 contract Transfer {
     mapping(string => uint64) accountM; // map for accounts
     // change the address of Broker accordingly
-    address BrokerAddr = 0xBdFBFBB88348dd577C07F6C8E35B626274251913;
+    address BrokerAddr = 0x9d7745Ff99bF08F66664e1417104360b390b8D1e;
     Broker broker = Broker(BrokerAddr);
 
     // AccessControl
@@ -13,36 +14,41 @@ contract Transfer {
     }
 
     // contract for asset
-    function transfer(string memory destChainServiceID, string memory sender, string memory receiver, string memory amount) public {
-        uint64 am = uint64(parseInt(amount));
-        require(accountM[sender] >= am);
-        accountM[sender] -= am;
+    function transfer(string memory destChainServiceID, string memory sender, string memory receiver, uint64 amount) public {
+        require(accountM[sender] >= amount);
+        accountM[sender] -= amount;
 
-        // stitch parameters
-        string memory args = concat(toSlice(sender), toSlice(","));
-        args = concat(toSlice(args), toSlice(receiver));
-        args = concat(toSlice(args), toSlice(","));
-        args = concat(toSlice(args), toSlice(amount));
-        args = concat(toSlice(args), toSlice(","));
-        args = concat(toSlice(args), toSlice("false"));
+        bytes[] memory args = new bytes[](3);
+        args[0] = abi.encodePacked(sender);
+        args[1] =abi.encodePacked(receiver);
+        args[2] = abi.encodePacked(amount);
+        
+        bytes[] memory argsRb = new bytes[](2);
+        argsRb[0] = abi.encodePacked(sender);
+        argsRb[1] = abi.encodePacked(amount);
 
-        string memory argsRb = concat(toSlice(sender), toSlice(","));
-        argsRb = concat(toSlice(argsRb), toSlice(amount));
-
-        broker.emitInterchainEvent(destChainServiceID, "interchainCharge,,interchainRollback", args, "", argsRb);
+        broker.emitInterchainEvent(destChainServiceID, "interchainCharge", args, "", new bytes[](0), "interchainRollback", argsRb, false);
     }
 
-    function interchainRollback(string memory sender, uint64 val) public onlyBroker {
-        accountM[sender] += val;
+    function interchainRollback(bytes[] memory args) public onlyBroker {
+        require(args.length == 2, "interchainRollback args' length is not correct, expect 2");
+        string memory sender = string(args[0]);
+        uint64 amount = bytesToUint64(args[1]);
+        accountM[sender] += amount;
     }
 
-    function interchainCharge(string memory sender, string memory receiver, uint64 val, bool isRollback) public onlyBroker returns(bool) {
+    function interchainCharge(bytes[] memory args, bool isRollback) public onlyBroker returns (bytes[] memory) {
+        require(args.length == 3, "interchainCharge args' length is not correct, expect 3");
+        string memory receiver = string(args[1]);
+        uint64 amount = bytesToUint64(args[2]);
+        
         if (!isRollback) {
-            accountM[receiver] += val;
+            accountM[receiver] += amount;
         } else {
-            accountM[receiver] -= val;
+            accountM[receiver] -= amount;
         }
-        return true;
+        
+        return new bytes[](0);
     }
 
     function getBalance(string memory id) public view returns(uint64) {
@@ -52,64 +58,24 @@ contract Transfer {
     function setBalance(string memory id, uint64 amount) public {
         accountM[id] = amount;
     }
-
-    function parseInt(string memory self) public pure returns (uint _ret) {
-        bytes memory _bytesValue = bytes(self);
-        uint j = 1;
-        for(uint i = _bytesValue.length-1; i >= 0 && i < _bytesValue.length; i--) {
-            assert(uint8(_bytesValue[i]) >= 48 && uint8(_bytesValue[i]) <= 57);
-            _ret += (uint8(_bytesValue[i]) - 48)*j;
-            j*=10;
+    
+    function bytesToUint64(bytes memory b) public pure returns (uint64){
+        uint64 number;
+        for(uint i=0;i<b.length;i++){
+            number = uint64(number + uint8(b[i])*(2**(8*(b.length-(i+1)))));
         }
-    }
-
-    struct slice {
-        uint _len;
-        uint _ptr;
-    }
-
-    function toSlice(string memory self) internal pure returns (slice memory) {
-        uint ptr;
-        assembly {
-            ptr := add(self, 0x20)
-        }
-        return slice(bytes(self).length, ptr);
-    }
-
-    function concat(slice memory self, slice memory other) internal pure returns (string memory) {
-        string memory ret = new string(self._len + other._len);
-        uint retptr;
-        assembly { retptr := add(ret, 32) }
-        memcpy(retptr, self._ptr, self._len);
-        memcpy(retptr + self._len, other._ptr, other._len);
-        return ret;
-    }
-
-    function memcpy(uint dest, uint src, uint len) private pure {
-        // Copy word-length chunks while possible
-        for(; len >= 32; len -= 32) {
-            assembly {
-                mstore(dest, mload(src))
-            }
-            dest += 32;
-            src += 32;
-        }
-
-        // Copy remaining bytes
-        uint mask = 256 ** (32 - len) - 1;
-        assembly {
-            let srcpart := and(mload(src), not(mask))
-            let destpart := and(mload(dest), mask)
-            mstore(dest, or(destpart, srcpart))
-        }
+        return number;
     }
 }
 
-contract Broker {
+abstract contract Broker {
     function emitInterchainEvent(
-        string memory destChainServiceID,
-        string memory funcs,
-        string memory args,
-        string memory argsCb,
-        string memory argsRb) public;
+        string memory destFullServiceID,
+        string memory func,
+        bytes[] memory args,
+        string memory funcCb,
+        bytes[] memory argsCb,
+        string memory funcRb,
+        bytes[] memory argsRb,
+        bool isEncrypt) public virtual;
 }

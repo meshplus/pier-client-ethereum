@@ -1,32 +1,68 @@
-pragma solidity >=0.5.6;
+pragma solidity >=0.5.7;
 pragma experimental ABIEncoderV2;
 
 contract Broker {
-    // Only the contract in the whitelist can invoke the Broker for interchain operations.
-    mapping(address => int64) whiteList;
-    address[] contracts;
-    address[] admins;
-    string bxhID;
-    string appchainID;
+    struct Proposal {
+        uint64 approve;
+        uint64 reject;
+        address[] votedAdmins;
+        bool exist;
+    }
 
-    event throwEvent(uint64 index, string dstFullID, string srcFullID, string funcs, string args, string argscb, string argsrb);
+    struct CallFunc {
+        string func;
+        bytes[] args;
+    }
+
+    struct InterchainInvoke {
+        bool encrypt;
+        CallFunc callFunc;
+        CallFunc callback;
+        CallFunc rollback;
+    }
+
+    struct Receipt {
+        bool encrypt;
+        bool status;
+        bytes[] result;
+    }
+
+    // Only the contract in the whitelist can invoke the Broker for interchain operations.
+    mapping(address => bool) localWhiteList;
+    address[] localServices;
+    mapping(address => Proposal) localServiceProposal;
+    address[] proposalList;
+
+    mapping(string => address[]) remoteWhiteList;
+    string[] remoteServices;
+
+    string bitxhubID;
+    string appchainID;
+    address[] validators;
+    uint64 valThreshold;
+    address[] admins;
+    uint64 adminThreshold;
+
+    address[] bxhSigners;
+
+    event throwInterchainEvent(uint64 index, string dstFullID, string srcFullID, string func, bytes[] args, bytes32 hash);
+    event throwReceiptEvent(uint64 index, string dstFullID, string srcFullID, bool status, bytes[] result, bytes32 hash);
 
     string[] outServicePairs;
     string[] inServicePairs;
     string[] callbackServicePairs;
 
-    mapping(string => uint64) outCounter; // mapping from contract address to out event last index
-    mapping(string => mapping(uint64 => uint)) outMessages;
-    mapping(string => uint64) inCounter;
-    mapping(string => mapping(uint64 => uint)) inMessages;
+    mapping(string => uint64) outCounter;
     mapping(string => uint64) callbackCounter;
-    mapping(string => mapping(uint64 => string)) invokeError;
-    mapping(string => mapping(uint64 => string)) callbackError;
+    mapping(string => uint64) inCounter;
     mapping(string => uint64) dstRollbackCounter;
+
+    mapping(string => mapping(uint64 => InterchainInvoke)) outMessages;
+    mapping(string => mapping(uint64 => Receipt)) receiptMessages;
 
     // Authority control. Contracts need to be registered.
     modifier onlyWhiteList {
-        require(whiteList[msg.sender] == 1, "Invoker are not in white list");
+        require(localWhiteList[msg.sender] == true, "Invoker are not in white list");
         _;
     }
 
@@ -36,9 +72,25 @@ contract Broker {
         for (uint i = 0; i < admins.length; i++) {
             if (msg.sender == admins[i]) {flag = true;}
         }
-        if (flag) {revert();}
+
+        require(flag == true, "Invoker are not in admin list");
         _;
     }
+
+    constructor(string memory _bitxhubID,
+        string memory _appchainID,
+        address[] memory _validators,
+        uint64 _valThreshold,
+        address[] memory _admins,
+        uint64 _adminThreshold) public {
+        bitxhubID = _bitxhubID;
+        appchainID = _appchainID;
+        validators = _validators;
+        valThreshold = _valThreshold;
+        admins = _admins;
+        adminThreshold = _adminThreshold;
+    }
+
 
     function initialize() public {
         for (uint i = 0; i < inServicePairs.length; i++) {
@@ -53,118 +105,260 @@ contract Broker {
         for (uint m = 0; m < inServicePairs.length; m++) {
             dstRollbackCounter[inServicePairs[m]] = 0;
         }
-        for (uint n = 0; n < contracts.length; n++) {
-            whiteList[contracts[n]] = 0;
+        for (uint n = 0; n < localServices.length; n++) {
+            localWhiteList[localServices[n]] = false;
+        }
+        for (uint x = 0; x < remoteServices.length; x++) {
+            delete remoteWhiteList[remoteServices[x]];
+        }
+        for (uint y = 0; y < proposalList.length; y++) {
+            delete localServiceProposal[proposalList[y]];
         }
         delete outServicePairs;
         delete inServicePairs;
         delete callbackServicePairs;
+        delete localServices;
+        delete remoteServices;
     }
 
-    // 0: auditting  1: approved  -1: refused
+    // register local service to Broker
     function register(address addr) public {
-        whiteList[addr] = 0;
+        if (localWhiteList[addr] || localServiceProposal[addr].exist) {
+            return;
+        }
+
+        address[] memory votedAdmins = new address[](admins.length);
+        localServiceProposal[addr] = Proposal(0, 0, votedAdmins, true);
     }
 
-    function audit(address addr, int64 status) public returns (bool) {
-        if (status != - 1 && status != 0 && status != 1) {return false;}
-        whiteList[addr] = status;
-        // Only approved contracts can be recorded
-        if (status == 1) {
-            contracts.push(addr);
+    function audit(address addr, int64 status) public onlyAdmin returns (bool) {
+        Proposal memory proposal = localServiceProposal[addr];
+        uint result = vote(proposal, status);
+
+        if (result == 0) {
+            return false;
         }
+
+        if (result == 1) {
+            delete localServiceProposal[addr];
+            localWhiteList[addr] = true;
+            localServices.push(addr);
+        } else {
+            delete localServiceProposal[addr];
+        }
+
         return true;
     }
 
-    constructor(string memory _bxhID, string memory _appchainID) public {
-        bxhID = _bxhID;
-        appchainID = _appchainID;
+    // return value explain:
+    // 0: vote is not finished
+    // 1: approve the proposal
+    // 2: reject the proposal
+    function vote(Proposal memory proposal, int64 status) private view returns (uint) {
+        require(proposal.exist, "the proposal does not exist");
+        require(status == 0 || status == 1, "vote status should be 0 or 1");
+
+        for (uint i = 0; i < proposal.votedAdmins.length; i++) {
+            require(proposal.votedAdmins[i] != msg.sender, "current use has voted the proposal");
+        }
+
+        proposal.votedAdmins[proposal.reject + proposal.approve] = msg.sender;
+        if (status == 0) {
+            proposal.reject++;
+            if (proposal.reject == admins.length - adminThreshold + 1) {
+                return 2;
+            }
+        } else {
+            proposal.approve++;
+            if (proposal.approve == adminThreshold) {
+                return 1;
+            }
+        }
+
+        return 0;
     }
 
-    function invokeInterchain(string calldata srcChainServiceID, uint64 index, address destAddr, uint64 reqType, bytes calldata bizCallData) payable external {
-        require(whiteList[destAddr] == 1);
-        invokeIndexUpdate(srcChainServiceID, index, destAddr, reqType, "");
+    // register service ID from counterparty appchain in direct mode, invoked by appchain admin
+    // serviceID: the service from counterparty appchain which will call service on current appchain
+    // banList：service list on current appchain which are not allowed to be called by remote service
+    function registerCounterParty(string memory serviceID, address[] memory banList) public onlyAdmin {
+        remoteWhiteList[serviceID] = banList;
+        remoteServices.push(serviceID);
+    }
 
-        assembly {
-            let ptr := mload(0x40)
+    // get the registered local service list
+    function getLocalServiceList() public view returns (string[] memory) {
+        string[] memory fullServiceIDList = new string[](localServices.length);
+        for (uint i = 0; i < localServices.length; i++) {
+            fullServiceIDList[i] = genFullServiceID(addressToString(localServices[i]));
+        }
 
-        // 获取bizCallData在calldata中的偏移
-            calldatacopy(ptr, 132, 32)
-            let off := mload(ptr)
+        return fullServiceIDList;
+    }
 
-        // 获取bizCallData的大小
-            calldatacopy(ptr, add(4, off), 32)
-            let datasize := mload(ptr)
+    // get the registered counterparty service list
+    function getRemoteServiceList() public view returns (string[] memory) {
+        return remoteServices;
+    }
 
-        // 将bizCallData的内容copy到ptr所指的内存
-            calldatacopy(ptr, add(36, off), datasize)
+    // called on dest chain
+    function invokeInterchain(string memory srcFullID,
+        address destAddr,
+        uint64 index,
+        uint64 typ,
+        string memory callFunc,
+        bytes[] memory args,
+        uint64 txStatus,
+        bytes[] memory signatures,
+        bool isEncrypt) payable external {
+        bool isRollback = false;
+        string memory dstFullID = genFullServiceID(addressToString(destAddr));
+        if (txStatus == 0) {
+            // INTERCHAIN && BEGIN
+            invokeIndexUpdate(srcFullID, dstFullID, index, 0);
+        } else {
+            // INTERCHAIN && FAILURE || INTERCHAIN && ROLLBACK, only happened in relay mode
+            isRollback = true;
+            invokeIndexUpdate(srcFullID, dstFullID, index, 2);
+        }
 
-        // 调用业务合约
-            let result := call(gas(), destAddr, callvalue(), ptr, datasize, 0, 0)
-            let size := returndatasize()
-            returndatacopy(ptr, 0, size)
+        checkService(srcFullID, destAddr);
 
-            switch result
-            case 0 {revert(ptr, size)}
-            default {
-                log0(ptr, size)
-                return (ptr, size)
-            }
+        checkInterchainMultiSigns(srcFullID, dstFullID, index, typ, callFunc, args, txStatus, signatures);
+
+        (bool status, bytes[] memory result) = callService(destAddr, callFunc, args, isRollback);
+
+        receiptMessages[genServicePair(srcFullID, dstFullID)][index] = Receipt(isEncrypt, status, result);
+
+        if (isEncrypt) {
+            emit throwReceiptEvent(index, dstFullID, srcFullID, status, new bytes[](0), computeHash(result));
+        } else {
+            emit throwReceiptEvent(index, dstFullID, srcFullID, status, result, computeHash(result));
         }
     }
 
-    function invokeIndexUpdate(string memory srcChainServiceID, uint64 index, address destAddr, uint64 reqType, string memory err) private {
-        string memory curServiceID = genFullServiceID(addressToString(destAddr));
+    function callService(address destAddr, string memory callFunc, bytes[] memory args, bool isRollback) private returns (bool, bytes[] memory) {
+        bool status = true;
+        bytes[] memory result;
 
+        if (keccak256(abi.encodePacked(callFunc)) != keccak256(abi.encodePacked(""))) {
+            (bool ok, bytes memory data) = address(destAddr).call(abi.encodeWithSignature(string(abi.encodePacked(callFunc, "(bytes[],bool)")), args, isRollback));
+            status = ok;
+            result = abi.decode(data, (bytes[]));
+        }
+
+        return (status, result);
+    }
+
+    function computeHash(bytes[] memory args) private returns (bytes32) {
+        bytes memory packed;
+        for (uint i = 0; i < args.length; i++) {
+            packed = abi.encodePacked(packed, args[i]);
+        }
+
+        return keccak256(packed);
+    }
+
+    // called on src chain
+    function invokeReceipt(address srcAddr,
+        string memory dstFullID,
+        uint64 index,
+        uint64 typ,
+        bytes[] memory result,
+        uint64 txStatus,
+        bytes[] memory signatures) payable external {
+        string memory srcFullID = genFullServiceID(addressToString(srcAddr));
+        bool isRollback = false;
+        if (validators.length == 0) {
+            require(typ == 1 || typ == 2, "IBTP type is not correct in direct mode");
+            if (typ == 2) {
+                isRollback = true;
+            }
+        } else {
+            if (txStatus != 0 && txStatus != 1) {
+                isRollback = true;
+            }
+        }
+
+        invokeIndexUpdate(srcFullID, dstFullID, index, 1);
+
+        checkReceiptMultiSigns(srcFullID, dstFullID, index, typ, result, txStatus, signatures);
+
+        string memory outServicePair = genServicePair(srcFullID, dstFullID);
+        CallFunc memory invokeFunc = outMessages[outServicePair][index].callback;
+        bytes[] memory args = invokeFunc.args;
+        if (isRollback) {
+            invokeFunc = outMessages[outServicePair][index].rollback;
+            args = new bytes[](invokeFunc.args.length + result.length);
+            for (uint i = 0; i < invokeFunc.args.length; i++) {
+                args[i] = invokeFunc.args[i];
+            }
+            for (uint i = 0; i < result.length; i++) {
+                args[invokeFunc.args.length + i] = result[i];
+            }
+        }
+
+        if (keccak256(abi.encodePacked(invokeFunc.func)) != keccak256(abi.encodePacked(""))) {
+            string memory method = string(abi.encodePacked(invokeFunc.func, "(bytes[])"));
+            address(srcAddr).call(abi.encodeWithSignature(method, args));
+        }
+    }
+
+    function invokeIndexUpdate(string memory srcFullID, string memory dstFullID, uint64 index, uint64 reqType) private {
+        string memory servicePair = genServicePair(srcFullID, dstFullID);
         if (reqType == 0) {
-            string memory inServicePair = genServicePair(srcChainServiceID, curServiceID);
-            require(inCounter[inServicePair] + 1 == index);
-            markInCounter(inServicePair);
-            if (keccak256(abi.encodePacked(err)) != keccak256(abi.encodePacked(""))) {
-                invokeError[inServicePair][index] = err;
-            }
+            require(inCounter[servicePair] + 1 == index);
+            markInCounter(servicePair);
         } else if (reqType == 1) {
-            string memory outServicePair = genServicePair(curServiceID, srcChainServiceID);
             // invoke src callback or rollback
-            require(callbackCounter[outServicePair] + 1 == index);
-            markCallbackCounter(outServicePair, index);
-            if (keccak256(abi.encodePacked(err)) != keccak256(abi.encodePacked(""))) {
-                callbackError[outServicePair][index] = err;
-            }
+            require(callbackCounter[servicePair] + 1 == index);
+            markCallbackCounter(servicePair, index);
         } else if (reqType == 2) {
-            string memory inServicePair = genServicePair(srcChainServiceID, curServiceID);
             // invoke dst rollback
-            require(dstRollbackCounter[inServicePair] + 1 <= index);
-            markDstRollbackCounter(inServicePair, index);
+            require(dstRollbackCounter[servicePair] + 1 <= index);
+            markDstRollbackCounter(servicePair, index);
         }
-    }
-
-    function invokeIndexUpdateWithError(string memory srcChainServiceID, uint64 index, address destAddr, uint64 reqType, string memory err) public {
-        invokeIndexUpdate(srcChainServiceID, index, destAddr, reqType, err);
     }
 
     function emitInterchainEvent(
-        string memory destChainServiceID,
-        string memory funcs,
-        string memory args,
-        string memory argscb,
-        string memory argsrb)
+        string memory destFullServiceID,
+        string memory funcCall,
+        bytes[] memory args,
+        string memory funcCb,
+        bytes[] memory argsCb,
+        string memory funcRb,
+        bytes[] memory argsRb,
+        bool isEncrypt)
     public onlyWhiteList {
         string memory curFullID = genFullServiceID(addressToString(msg.sender));
-        string memory outServicePair = genServicePair(curFullID, destChainServiceID);
+        string memory outServicePair = genServicePair(curFullID, destFullServiceID);
 
         // Record the order of interchain contract which has been started.
         outCounter[outServicePair]++;
         if (outCounter[outServicePair] == 1) {
             outServicePairs.push(outServicePair);
         }
-        outMessages[outServicePair][outCounter[outServicePair]] = block.number;
+
+        outMessages[outServicePair][outCounter[outServicePair]] = InterchainInvoke(isEncrypt,
+            CallFunc(funcCall, args),
+            CallFunc(funcCb, argsCb),
+            CallFunc(funcRb, argsRb));
+
+        bytes memory packed = abi.encodePacked(funcCall);
+        for (uint i = 0; i < args.length; i++) {
+            packed = abi.encodePacked(packed, args[i]);
+        }
+        bytes32 hash = keccak256(packed);
+
+        if (isEncrypt) {
+            funcCall = "";
+            args = new bytes[](0);
+        }
 
         // Throw interchain event for listening of plugin.
-        emit throwEvent(outCounter[outServicePair], destChainServiceID, curFullID, funcs, args, argscb, argsrb);
+        emit throwInterchainEvent(outCounter[outServicePair], destFullServiceID, curFullID, funcCall, args, hash);
     }
-    
-    
+
 
     // The helper functions that help document Meta information.
     function markCallbackCounter(string memory servicePair, uint64 index) private {
@@ -183,8 +377,6 @@ contract Broker {
         if (inCounter[servicePair] == 1) {
             inServicePairs.push(servicePair);
         }
-
-        inMessages[servicePair][inCounter[servicePair]] = block.number;
     }
 
     // The helper functions that help plugin query.
@@ -197,12 +389,14 @@ contract Broker {
         return (outServicePairs, indices);
     }
 
-    function getOutMessage(string memory outServicePair, uint64 idx) public view returns (uint) {
-        return outMessages[outServicePair][idx];
+    function getOutMessage(string memory outServicePair, uint64 idx) public view returns (string memory, bytes[] memory, bool) {
+        InterchainInvoke memory invoke = outMessages[outServicePair][idx];
+        return (invoke.callFunc.func, invoke.callFunc.args, invoke.encrypt);
     }
 
-    function getInMessage(string memory inServicePair, uint64 idx) public view returns (uint)  {
-        return inMessages[inServicePair][idx];
+    function getReceiptMessage(string memory inServicePair, uint64 idx) public view returns (bytes[] memory, bool, bool)  {
+        Receipt memory receipt = receiptMessages[inServicePair][idx];
+        return (receipt.result, receipt.status, receipt.encrypt);
     }
 
     function getInnerMeta() public view returns (string[] memory, uint64[] memory) {
@@ -223,7 +417,7 @@ contract Broker {
         return (callbackServicePairs, indices);
     }
 
-    function getDstRollbackMeta() public view returns(string[] memory, uint64[] memory) {
+    function getDstRollbackMeta() public view returns (string[] memory, uint64[] memory) {
         uint64[] memory indices = new uint64[](inServicePairs.length);
         for (uint i = 0; i < inServicePairs.length; i++) {
             indices[i] = dstRollbackCounter[inServicePairs[i]];
@@ -233,214 +427,269 @@ contract Broker {
     }
 
     function genFullServiceID(string memory serviceID) public view returns (string memory) {
-        string memory fullID = concat(toSlice(bxhID), toSlice(":"));
-        fullID = concat(toSlice(fullID), toSlice(appchainID));
-        fullID = concat(toSlice(fullID), toSlice(":"));
-        fullID = concat(toSlice(fullID), toSlice(serviceID));
-        return fullID;
+        return string(abi.encodePacked(bitxhubID, ":", appchainID, ":", serviceID));
     }
 
     function genServicePair(string memory from, string memory to) internal pure returns (string memory) {
-        string memory servicePair = concat(toSlice(from), toSlice("-"));
-        servicePair = concat(toSlice(servicePair), toSlice(to));
-
-        return servicePair;
+        return string(abi.encodePacked(from, "-", to));
     }
 
     function getChainID() public view returns (string memory, string memory) {
-        return (bxhID, appchainID);
+        return (bitxhubID, appchainID);
     }
 
-    function _indexOf(string memory _base, string memory _value, uint _offset) internal pure returns (int) {
-        bytes memory _baseBytes = bytes(_base);
-        bytes memory _valueBytes = bytes(_value);
+    function checkService(string memory remoteService, address destAddr) private view {
+        require(localWhiteList[destAddr] == true, "dest address is not in local white list");
 
-        assert(_valueBytes.length == 1);
+        if (valThreshold == 0) {
+            // direct mode
 
-        for (uint i = _offset; i < _baseBytes.length; i++) {
-            if (_baseBytes[i] == _valueBytes[0]) {
-                return int(i);
+            bool flag = false;
+            for (uint i = 0; i < remoteServices.length; i++) {
+                if (keccak256(abi.encodePacked(remoteService)) == keccak256(abi.encodePacked(remoteServices[i]))) {
+                    flag = true;
+                    break;
+                }
+            }
+            require(flag == true, "remote service is not registered");
+
+            flag = false;
+            address[] memory banList = remoteWhiteList[remoteService];
+            for (uint i = 0; i < banList.length; i++) {
+                if (destAddr == banList[i]) {
+                    flag = true;
+                    break;
+                }
+            }
+            require(flag == false, "remote service is not allowed to call dest address");
+        }
+    }
+
+    function checkInterchainMultiSigns(string memory srcFullID,
+        string memory dstFullID,
+        uint64 index,
+        uint64 typ,
+        string memory callFunc,
+        bytes[] memory args,
+        uint64 txStatus,
+        bytes[] memory multiSignatures) internal {
+        if (adminThreshold == 0) {
+            return;
+        }
+
+        bytes memory packed = abi.encodePacked(srcFullID, dstFullID, index, typ);
+        bytes memory funcPacked = abi.encodePacked(callFunc);
+        for (uint i = 0; i < args.length; i++) {
+            funcPacked = abi.encodePacked(funcPacked, args[i]);
+        }
+        packed = abi.encodePacked(packed, keccak256(funcPacked), txStatus);
+        bytes32 hash = keccak256(packed);
+
+        require(checkMultiSigns(hash, multiSignatures), "invalid multi-signature");
+    }
+
+    function checkReceiptMultiSigns(string memory srcFullID,
+        string memory dstFullID,
+        uint64 index,
+        uint64 typ,
+        bytes[] memory result,
+        uint64 txStatus,
+        bytes[] memory multiSignatures) internal {
+        if (adminThreshold == 0) {
+            return;
+        }
+
+        bytes memory packed = abi.encodePacked(srcFullID, dstFullID, index, typ);
+        bytes memory data;
+        if (typ == 0 && txStatus == 3) {
+            string memory outServicePair = genServicePair(srcFullID, dstFullID);
+            CallFunc memory callFunc = outMessages[outServicePair][index].callFunc;
+            data = abi.encodePacked(data, callFunc.func);
+            for (uint i = 0; i < callFunc.args.length; i++) {
+                data = abi.encodePacked(data, callFunc.args[i]);
+            }
+        } else {
+            for (uint i = 0; i < result.length; i++) {
+                data = abi.encodePacked(data, result[i]);
+            }
+        }
+        packed = abi.encodePacked(packed, keccak256(data), txStatus);
+        bytes32 hash = keccak256(packed);
+
+        require(checkMultiSigns(hash, multiSignatures), "invalid multi-signature");
+    }
+
+    function checkMultiSigns(bytes32 hash, bytes[] memory multiSignatures) private returns (bool) {
+        for (uint i = 0; i < multiSignatures.length; i++) {
+            bytes memory sig = multiSignatures[i];
+            if (sig.length != 65) {
+                continue;
+            }
+
+            (uint8 v, bytes32 r, bytes32 s) = splitSignature(sig);
+
+            address addr = ecrecover(hash, v, r, s);
+
+            if (addressArrayContains(validators, addr)) {
+                if (addressArrayContains(bxhSigners, addr)) {
+                    continue;
+                }
+                bxhSigners.push(addr);
+                if (bxhSigners.length == valThreshold) {
+                    delete bxhSigners;
+                    return true;
+                }
+            }
+        }
+        delete bxhSigners;
+        return false;
+    }
+
+    function addressArrayContains(address[] memory addrs, address addr) private pure returns (bool) {
+        for (uint i = 0; i < addrs.length; i++) {
+            if (addrs[i] == addr) {
+                return true;
             }
         }
 
-        return - 1;
+        return false;
     }
 
-    struct slice {
-        uint _len;
-        uint _ptr;
-    }
 
-    function toSlice(string memory self) internal pure returns (slice memory) {
-        uint ptr;
+    function splitSignature(bytes memory sig) internal pure returns (uint8 v, bytes32 r, bytes32 s) {
         assembly {
-            ptr := add(self, 0x20)
-        }
-        return slice(bytes(self).length, ptr);
-    }
-
-    function concat(slice memory self, slice memory other) internal pure returns (string memory) {
-        string memory ret = new string(self._len + other._len);
-        uint retptr;
-        assembly { retptr := add(ret, 32) }
-        memcpy(retptr, self._ptr, self._len);
-        memcpy(retptr + self._len, other._ptr, other._len);
-        return ret;
-    }
-
-    function memcpy(uint dest, uint src, uint len) private pure {
-        // Copy word-length chunks while possible
-        for(; len >= 32; len -= 32) {
-            assembly {
-                mstore(dest, mload(src))
-            }
-            dest += 32;
-            src += 32;
+        // first 32 bytes, after the length prefix
+            r := mload(add(sig, 32))
+        // second 32 bytes
+            s := mload(add(sig, 64))
+        // final byte (first byte of the next 32 bytes)
+            v := byte(0, mload(add(sig, 96)))
         }
 
-        // Copy remaining bytes
-        uint mask = 256 ** (32 - len) - 1;
-        assembly {
-            let srcpart := and(mload(src), not(mask))
-            let destpart := and(mload(dest), mask)
-            mstore(dest, or(destpart, srcpart))
+        return (v + 27, r, s);
+    }
+
+    function _getAsciiOffset(
+        uint8 nibble, bool caps
+    ) internal pure returns (uint8 offset) {
+        // to convert to ascii characters, add 48 to 0-9, 55 to A-F, & 87 to a-f.
+        if (nibble < 10) {
+            offset = 48;
+        } else if (caps) {
+            offset = 55;
+        } else {
+            offset = 87;
         }
     }
 
-    // function addressToString(address x) internal pure returns (string memory) {
-    //     bytes memory s = new bytes(40);
-    //     for (uint i = 0; i < 20; i++) {
-    //         bytes1 b = bytes1(uint8(uint(uint160(x)) / (2**(8*(19 - i)))));
-    //         bytes1 hi = bytes1(uint8(b) / 16);
-    //         bytes1 lo = bytes1(uint8(b) - 16 * uint8(hi));
-    //         s[2*i] = char(hi);
-    //         s[2*i+1] = char(lo);
-    //     }
-    //     return string(s);
-    // }
-    
-    
-  function _getAsciiOffset(
-    uint8 nibble, bool caps
-  ) internal pure returns (uint8 offset) {
-    // to convert to ascii characters, add 48 to 0-9, 55 to A-F, & 87 to a-f.
-    if (nibble < 10) {
-      offset = 48;
-    } else if (caps) {
-      offset = 55;
-    } else {
-      offset = 87;
-    }
-  }
-    
     function addressToString(
-    address account
-  ) public pure returns (string memory asciiString) {
-    // convert the account argument from address to bytes.
-    bytes20 data = bytes20(account);
+        address account
+    ) public pure returns (string memory asciiString) {
+        // convert the account argument from address to bytes.
+        bytes20 data = bytes20(account);
 
-    // create an in-memory fixed-size bytes array.
-    bytes memory asciiBytes = new bytes(40);
+        // create an in-memory fixed-size bytes array.
+        bytes memory asciiBytes = new bytes(40);
 
-    // declare variable types.
-    uint8 b;
-    uint8 leftNibble;
-    uint8 rightNibble;
-    bool leftCaps;
-    bool rightCaps;
-    uint8 asciiOffset;
+        // declare variable types.
+        uint8 b;
+        uint8 leftNibble;
+        uint8 rightNibble;
+        bool leftCaps;
+        bool rightCaps;
+        uint8 asciiOffset;
 
-    // get the capitalized characters in the actual checksum.
-    bool[40] memory caps = _toChecksumCapsFlags(account);
+        // get the capitalized characters in the actual checksum.
+        bool[40] memory caps = _toChecksumCapsFlags(account);
 
-    // iterate over bytes, processing left and right nibble in each iteration.
-    for (uint256 i = 0; i < data.length; i++) {
-      // locate the byte and extract each nibble.
-      b = uint8(uint160(data) / (2**(8*(19 - i))));
-      leftNibble = b / 16;
-      rightNibble = b - 16 * leftNibble;
+        // iterate over bytes, processing left and right nibble in each iteration.
+        for (uint256 i = 0; i < data.length; i++) {
+            // locate the byte and extract each nibble.
+            b = uint8(uint160(data) / (2 ** (8 * (19 - i))));
+            leftNibble = b / 16;
+            rightNibble = b - 16 * leftNibble;
 
-      // locate and extract each capitalization status.
-      leftCaps = caps[2*i];
-      rightCaps = caps[2*i + 1];
+            // locate and extract each capitalization status.
+            leftCaps = caps[2 * i];
+            rightCaps = caps[2 * i + 1];
 
-      // get the offset from nibble value to ascii character for left nibble.
-      asciiOffset = _getAsciiOffset(leftNibble, leftCaps);
+            // get the offset from nibble value to ascii character for left nibble.
+            asciiOffset = _getAsciiOffset(leftNibble, leftCaps);
 
-      // add the converted character to the byte array.
-      asciiBytes[2 * i] = byte(leftNibble + asciiOffset);
+            // add the converted character to the byte array.
+            asciiBytes[2 * i] = bytes1(leftNibble + asciiOffset);
 
-      // get the offset from nibble value to ascii character for right nibble.
-      asciiOffset = _getAsciiOffset(rightNibble, rightCaps);
+            // get the offset from nibble value to ascii character for right nibble.
+            asciiOffset = _getAsciiOffset(rightNibble, rightCaps);
 
-      // add the converted character to the byte array.
-      asciiBytes[2 * i + 1] = byte(rightNibble + asciiOffset);
+            // add the converted character to the byte array.
+            asciiBytes[2 * i + 1] = bytes1(rightNibble + asciiOffset);
+        }
+
+
+        return string(abi.encodePacked("0x", asciiBytes));
     }
 
-   
-    return concat(toSlice("0x"), toSlice(string(asciiBytes)));
-  }
+    function _toChecksumCapsFlags(address account) internal pure returns (
+        bool[40] memory characterCapitalized
+    ) {
+        // convert the address to bytes.
+        bytes20 a = bytes20(account);
 
-  function _toChecksumCapsFlags(address account) internal pure returns (
-    bool[40] memory characterCapitalized
-  ) {
-    // convert the address to bytes.
-    bytes20 a = bytes20(account);
+        // hash the address (used to calculate checksum).
+        bytes32 b = keccak256(abi.encodePacked(_toAsciiString(a)));
 
-    // hash the address (used to calculate checksum).
-    bytes32 b = keccak256(abi.encodePacked(_toAsciiString(a)));
+        // declare variable types.
+        uint8 leftNibbleAddress;
+        uint8 rightNibbleAddress;
+        uint8 leftNibbleHash;
+        uint8 rightNibbleHash;
 
-    // declare variable types.
-    uint8 leftNibbleAddress;
-    uint8 rightNibbleAddress;
-    uint8 leftNibbleHash;
-    uint8 rightNibbleHash;
+        // iterate over bytes, processing left and right nibble in each iteration.
+        for (uint256 i; i < a.length; i++) {
+            // locate the byte and extract each nibble for the address and the hash.
+            rightNibbleAddress = uint8(a[i]) % 16;
+            leftNibbleAddress = (uint8(a[i]) - rightNibbleAddress) / 16;
+            rightNibbleHash = uint8(b[i]) % 16;
+            leftNibbleHash = (uint8(b[i]) - rightNibbleHash) / 16;
 
-    // iterate over bytes, processing left and right nibble in each iteration.
-    for (uint256 i; i < a.length; i++) {
-      // locate the byte and extract each nibble for the address and the hash.
-      rightNibbleAddress = uint8(a[i]) % 16;
-      leftNibbleAddress = (uint8(a[i]) - rightNibbleAddress) / 16;
-      rightNibbleHash = uint8(b[i]) % 16;
-      leftNibbleHash = (uint8(b[i]) - rightNibbleHash) / 16;
-
-      characterCapitalized[2 * i] = (
-        leftNibbleAddress > 9 &&
-        leftNibbleHash > 7
-      );
-      characterCapitalized[2 * i + 1] = (
-        rightNibbleAddress > 9 &&
-        rightNibbleHash > 7
-      );
-    }
-  }
-  
-  // based on https://ethereum.stackexchange.com/a/56499/48410
-  function _toAsciiString(
-    bytes20 data
-  ) internal pure returns (string memory asciiString) {
-    // create an in-memory fixed-size bytes array.
-    bytes memory asciiBytes = new bytes(40);
-
-    // declare variable types.
-    uint8 b;
-    uint8 leftNibble;
-    uint8 rightNibble;
-
-    // iterate over bytes, processing left and right nibble in each iteration.
-    for (uint256 i = 0; i < data.length; i++) {
-      // locate the byte and extract each nibble.
-      b = uint8(uint160(data) / (2 ** (8 * (19 - i))));
-      leftNibble = b / 16;
-      rightNibble = b - 16 * leftNibble;
-
-      // to convert to ascii characters, add 48 to 0-9 and 87 to a-f.
-      asciiBytes[2 * i] = byte(leftNibble + (leftNibble < 10 ? 48 : 87));
-      asciiBytes[2 * i + 1] = byte(rightNibble + (rightNibble < 10 ? 48 : 87));
+            characterCapitalized[2 * i] = (
+            leftNibbleAddress > 9 &&
+            leftNibbleHash > 7
+            );
+            characterCapitalized[2 * i + 1] = (
+            rightNibbleAddress > 9 &&
+            rightNibbleHash > 7
+            );
+        }
     }
 
-    return string(asciiBytes);
-  }
+    // based on https://ethereum.stackexchange.com/a/56499/48410
+    function _toAsciiString(
+        bytes20 data
+    ) internal pure returns (string memory asciiString) {
+        // create an in-memory fixed-size bytes array.
+        bytes memory asciiBytes = new bytes(40);
+
+        // declare variable types.
+        uint8 b;
+        uint8 leftNibble;
+        uint8 rightNibble;
+
+        // iterate over bytes, processing left and right nibble in each iteration.
+        for (uint256 i = 0; i < data.length; i++) {
+            // locate the byte and extract each nibble.
+            b = uint8(uint160(data) / (2 ** (8 * (19 - i))));
+            leftNibble = b / 16;
+            rightNibble = b - 16 * leftNibble;
+
+            // to convert to ascii characters, add 48 to 0-9 and 87 to a-f.
+            asciiBytes[2 * i] = bytes1(leftNibble + (leftNibble < 10 ? 48 : 87));
+            asciiBytes[2 * i + 1] = bytes1(rightNibble + (rightNibble < 10 ? 48 : 87));
+        }
+
+        return string(asciiBytes);
+    }
 
 
     function char(bytes1 b) internal pure returns (bytes1 c) {

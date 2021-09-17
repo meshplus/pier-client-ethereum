@@ -1,61 +1,60 @@
 package main
 
 import (
-	"fmt"
+	"github.com/ethereum/go-ethereum/crypto"
 
 	"github.com/meshplus/bitxhub-model/pb"
 )
 
-func (c *Client) generateCallback(original *pb.IBTP, args [][]byte, status bool) (result *pb.IBTP, err error) {
-	if original == nil {
-		return nil, fmt.Errorf("got nil ibtp To generate receipt: %w", err)
-	}
-	pd := &pb.Payload{}
-	if err := pd.Unmarshal(original.Payload); err != nil {
-		return nil, fmt.Errorf("ibtp payload unmarshal: %w", err)
+func (c *Client) generateCallback(original *pb.IBTP, data [][]byte, status bool) (result *pb.IBTP, err error) {
+	payload := &pb.Payload{}
+	if err := payload.Unmarshal(original.Payload); err != nil {
+		return nil, err
 	}
 
-	originalContent := &pb.Content{}
-	if err := originalContent.Unmarshal(pd.Content); err != nil {
-		return nil, fmt.Errorf("ibtp payload unmarshal: %w", err)
+	return generateReceipt(original.From, original.To, original.Index, data, status, payload.Encrypted)
+}
+
+func generateReceipt(from, to string, idx uint64, data [][]byte, status, encrypt bool) (*pb.IBTP, error) {
+	result := &pb.Result{Data: data}
+	content, err := result.Marshal()
+	if err != nil {
+		return nil, err
 	}
 
-	content := &pb.Content{}
+	var packed []byte
+	for _, ele := range data {
+		packed = append(packed, ele...)
+	}
+
+	payload := pb.Payload{
+		Encrypted: encrypt,
+		Content:   content,
+		Hash:      crypto.Keccak256(packed),
+	}
+
+	pd, err := payload.Marshal()
+	if err != nil {
+		return nil, err
+	}
+
 	typ := pb.IBTP_RECEIPT_SUCCESS
-
-	if status {
-		content.Func = originalContent.Callback
-		content.Args = append(originalContent.ArgsCb, args...)
-	} else {
-		content.Func = originalContent.Rollback
-		content.Args = originalContent.ArgsRb
+	if !status {
 		typ = pb.IBTP_RECEIPT_FAILURE
 	}
 
-	if original.Type == pb.IBTP_ROLLBACK {
-		typ = pb.IBTP_RECEIPT_ROLLBACK
-	}
-
-	b, err := content.Marshal()
-	if err != nil {
-		return nil, err
-	}
-	retPd := &pb.Payload{
-		Content: b,
-	}
-
-	pdb, err := retPd.Marshal()
-	if err != nil {
-		return nil, err
-	}
-
 	return &pb.IBTP{
-		From:    original.From,
-		To:      original.To,
-		Index:   original.Index,
-		Type:    typ,
-		Proof:   original.Proof,
-		Payload: pdb,
-		Version: original.Version,
+		From:          from,
+		To:            to,
+		Index:         idx,
+		Type:          typ,
+		TimeoutHeight: 0,
+		Proof:         []byte("1"),
+		Payload:       pd,
 	}, nil
+}
+
+// TODO
+func unpackToBytesArray(data []byte) ([][]byte, error) {
+	return nil, nil
 }
