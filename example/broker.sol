@@ -317,6 +317,9 @@ contract Broker {
             // invoke dst rollback
             require(dstRollbackCounter[servicePair] + 1 <= index);
             markDstRollbackCounter(servicePair, index);
+            if (inCounter[servicePair] + 1 == index) {
+                markInCounter(servicePair);
+            }
         }
     }
 
