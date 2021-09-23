@@ -211,22 +211,27 @@ contract Broker {
         uint64 txStatus,
         bytes[] memory signatures,
         bool isEncrypt) payable external {
-        bool isRollback = false;
+        // bool isRollback = false;
         string memory dstFullID = genFullServiceID(addressToString(destAddr));
-        if (txStatus == 0) {
-            // INTERCHAIN && BEGIN
-            invokeIndexUpdate(srcFullID, dstFullID, index, 0);
-        } else {
-            // INTERCHAIN && FAILURE || INTERCHAIN && ROLLBACK, only happened in relay mode
-            isRollback = true;
-            invokeIndexUpdate(srcFullID, dstFullID, index, 2);
-        }
+        string memory servicePair = genServicePair(srcFullID, dstFullID);
 
         checkService(srcFullID, destAddr);
 
         checkInterchainMultiSigns(srcFullID, dstFullID, index, typ, callFunc, args, txStatus, signatures);
 
-        (bool status, bytes[] memory result) = callService(destAddr, callFunc, args, isRollback);
+        bool status = true;
+        bytes[] memory result;
+        if (txStatus == 0) {
+            // INTERCHAIN && BEGIN
+             (status, result) = callService(destAddr, callFunc, args, false);
+            invokeIndexUpdate(srcFullID, dstFullID, index, 0);
+        } else {
+            // INTERCHAIN && FAILURE || INTERCHAIN && ROLLBACK, only happened in relay mode
+            if (inCounter[servicePair] >= index) {
+                (status, result) = callService(destAddr, callFunc, args, true);
+            }
+            invokeIndexUpdate(srcFullID, dstFullID, index, 2);
+        }
 
         receiptMessages[genServicePair(srcFullID, dstFullID)][index] = Receipt(isEncrypt, status, result);
 
