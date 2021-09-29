@@ -26,13 +26,6 @@ type Ether struct {
 	ChainID         string `mapstructure:"chain_id" json:"chain_id"`
 }
 
-type Service struct {
-	ID   string `toml:"id" json:"id"`
-	Name string `toml:"name" json:"name"`
-	Type string `toml:"type" json:"type"`
-	Abi  string `toml:"abi" json:"abi"`
-}
-
 func defaultConfig() *Config {
 	return &Config{
 		Ether: Ether{
@@ -41,8 +34,8 @@ func defaultConfig() *Config {
 			ContractAddress: "0xD3880ea40670eD51C3e3C0ea089fDbDc9e3FBBb4",
 			KeyPath:         "account.key",
 			Password:        "",
-			MinConfirm:      5,
-			TimeoutHeight:   10,
+			MinConfirm:      15,
+			TimeoutHeight:   100,
 		},
 	}
 }
