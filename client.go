@@ -47,6 +47,10 @@ var (
 
 const InvokeInterchain = "invokeInterchain"
 
+func (c *Client) GetUpdateMeta() chan *pb.UpdateMeta {
+	panic("implement me")
+}
+
 func (c *Client) Initialize(configPath string, extra []byte) error {
 	cfg, err := UnmarshalConfig(configPath)
 	if err != nil {
@@ -128,6 +132,10 @@ func (c *Client) Stop() error {
 	return nil
 }
 
+func (c *Client) GetIBTPCh() chan *pb.IBTP {
+	return c.eventC
+}
+
 func (c *Client) Name() string {
 	return c.config.Ether.Name
 }
@@ -136,92 +144,30 @@ func (c *Client) Type() string {
 	return EtherType
 }
 
-func (c *Client) GetIBTP() chan *pb.IBTP {
-	return c.eventC
-}
-
 // SubmitIBTP submit interchain ibtp. It will unwrap the ibtp and execute
 // the function inside the ibtp. If any execution results returned, pass
 // them to other modules.
-func (c *Client) SubmitIBTP(ibtp *pb.IBTP) (*pb.SubmitIBTPResponse, error) {
+func (c *Client) SubmitIBTP(from string, index uint64, serviceID string, ibtpType pb.IBTP_Type, content *pb.Content, proof *pb.BxhProof, isEncrypted bool) (*pb.SubmitIBTPResponse, error) {
 	ret := &pb.SubmitIBTPResponse{Status: true}
-	pd := &pb.Payload{}
-	if err := pd.Unmarshal(ibtp.Payload); err != nil {
-		return nil, fmt.Errorf("ibtp payload unmarshal: %w", err)
-	}
-	content := &pb.Content{}
-	if err := content.Unmarshal(pd.Content); err != nil {
-		return ret, fmt.Errorf("ibtp content unmarshal: %w", err)
-	}
-
-	_, _, serviceID, err := pb.ParseFullServiceID(ibtp.To)
-	if err != nil {
-		return nil, err
-	}
-
-	proof := &pb.BxhProof{}
-	if ibtp.Proof != nil {
-		if err := proof.Unmarshal(ibtp.Proof); err != nil {
-			return nil, err
-		}
-	}
-
-	logger.Info("submit ibtp", "id", ibtp.ID(), "type", strconv.Itoa(int(ibtp.Type)),
-		"txStatus", strconv.Itoa(int(proof.TxStatus)), "func", content.Func)
-	for i, arg := range content.Args {
-		logger.Info("arg", strconv.Itoa(i), hexutil.Encode(arg))
-	}
-
-	receipt, err := c.invokeInterchain(ibtp.From, ibtp.Index, serviceID, uint64(ibtp.Type), content.Func, content.Args, uint64(proof.TxStatus), proof.MultiSign, pd.Encrypted)
+	receipt, err := c.invokeInterchain(from, index, serviceID, uint64(ibtpType), content.Func, content.Args, uint64(proof.TxStatus), proof.MultiSign, isEncrypted)
 	if err != nil {
 		ret.Status = false
 		ret.Message = err.Error()
 		return ret, nil
 	}
 
-	for i, log := range receipt.Logs {
-		logger.Info("log", "index", strconv.Itoa(i), "data", hexutil.Encode(log.Data))
-	}
-
 	if receipt.Status != types.ReceiptStatusSuccessful {
 		ret.Status = false
-		ret.Message = fmt.Sprintf("InvokeInterchain tx execution failed")
+		ret.Message = fmt.Sprintf("SubmitIBTP tx execution failed")
 		return ret, nil
 	}
 
 	return ret, nil
 }
 
-func (c *Client) SubmitReceipt(ibtp *pb.IBTP) (*pb.SubmitIBTPResponse, error) {
+func (c *Client) SubmitReceipt(to string, index uint64, serviceID string, ibtpType pb.IBTP_Type, result *pb.Result, proof *pb.BxhProof) (*pb.SubmitIBTPResponse, error) {
 	ret := &pb.SubmitIBTPResponse{Status: true}
-	pd := &pb.Payload{}
-	if err := pd.Unmarshal(ibtp.Payload); err != nil {
-		return nil, fmt.Errorf("ibtp payload unmarshal: %w", err)
-	}
-	result := &pb.Result{}
-	if err := result.Unmarshal(pd.Content); err != nil {
-		return ret, fmt.Errorf("ibtp content unmarshal: %w", err)
-	}
-
-	_, _, serviceID, err := pb.ParseFullServiceID(ibtp.From)
-	if err != nil {
-		return nil, err
-	}
-
-	proof := &pb.BxhProof{}
-	if ibtp.Proof != nil {
-		if err := proof.Unmarshal(ibtp.Proof); err != nil {
-			return nil, err
-		}
-	}
-
-	logger.Info("submit ibtp receipt", "id", ibtp.ID(), "type", strconv.Itoa(int(ibtp.Type)),
-		"txStatus", strconv.Itoa(int(proof.TxStatus)))
-	for i, data := range result.Data {
-		logger.Info("data", strconv.Itoa(i), string(data))
-	}
-
-	receipt, err := c.invokeReceipt(serviceID, ibtp.To, ibtp.Index, uint64(ibtp.Type), result.Data, uint64(proof.TxStatus), proof.MultiSign)
+	receipt, err := c.invokeReceipt(serviceID, to, index, uint64(ibtpType), result.Data, uint64(proof.TxStatus), proof.MultiSign)
 	if err != nil {
 		ret.Status = false
 		ret.Message = err.Error()
@@ -230,7 +176,7 @@ func (c *Client) SubmitReceipt(ibtp *pb.IBTP) (*pb.SubmitIBTPResponse, error) {
 
 	if receipt.Status != types.ReceiptStatusSuccessful {
 		ret.Status = false
-		ret.Message = fmt.Sprintf("InvokeInterchain tx execution failed")
+		ret.Message = fmt.Sprintf("SubmitReceipt tx execution failed")
 	}
 
 	return ret, nil
