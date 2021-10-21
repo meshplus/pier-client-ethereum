@@ -4,7 +4,7 @@ pragma experimental ABIEncoderV2;
 contract Transfer {
     mapping(string => uint64) accountM; // map for accounts
     // change the address of Broker accordingly
-    address BrokerAddr = 0x9d7745Ff99bF08F66664e1417104360b390b8D1e;
+    address BrokerAddr = 0xc9F052a8e085f4c78936939BE725Bc7ce0f57a79;
     Broker broker = Broker(BrokerAddr);
 
     // AccessControl

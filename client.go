@@ -30,6 +30,7 @@ type Client struct {
 	abi       abi.ABI
 	config    *Config
 	ctx       context.Context
+	cancel    context.CancelFunc
 	ethClient *ethclient.Client
 	session   *BrokerSession
 	eventC    chan *pb.IBTP
@@ -119,7 +120,7 @@ func (c *Client) Initialize(configPath string, extra []byte) error {
 	c.ethClient = etherCli
 	c.session = session
 	c.abi = ab
-	c.ctx = context.Background()
+	c.ctx, c.cancel = context.WithCancel(context.Background())
 
 	return nil
 }
@@ -129,6 +130,7 @@ func (c *Client) Start() error {
 }
 
 func (c *Client) Stop() error {
+	c.cancel()
 	return nil
 }
 
@@ -403,4 +405,13 @@ func (c *Client) GetChainID() (string, string, error) {
 
 func (c *Client) GetServices() ([]string, error) {
 	return c.session.GetLocalServiceList()
+}
+
+func (c *Client) GetAppchainInfo(chainID string) (string, []byte, string, error) {
+	broker, trustRoot, ruleAddr, err := c.session.GetAppchainInfo(chainID)
+	if err != nil {
+		return "", nil, "", err
+	}
+
+	return broker, trustRoot, ruleAddr.String(), nil
 }

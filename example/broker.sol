@@ -27,12 +27,23 @@ contract Broker {
         bytes[] result;
     }
 
+    struct Appchain {
+        string id;
+        string broker;
+        bytes trustRoot;
+        address ruleAddr;
+        uint64 status;
+        bool exist;
+    }
+
     // Only the contract in the whitelist can invoke the Broker for interchain operations.
     mapping(address => bool) localWhiteList;
     address[] localServices;
     mapping(address => Proposal) localServiceProposal;
     address[] proposalList;
 
+    mapping(string => Appchain) appchains;
+    string[] appchainIDs;
     mapping(string => address[]) remoteWhiteList;
     string[] remoteServices;
 
@@ -114,11 +125,15 @@ contract Broker {
         for (uint y = 0; y < proposalList.length; y++) {
             delete localServiceProposal[proposalList[y]];
         }
+        for (uint z = 0; z < appchainIDs.length; z++) {
+            delete appchains[appchainIDs[z]];
+        }
         delete outServicePairs;
         delete inServicePairs;
         delete callbackServicePairs;
         delete localServices;
         delete remoteServices;
+        delete appchainIDs;
     }
 
     // register local service to Broker
@@ -178,12 +193,32 @@ contract Broker {
         return 0;
     }
 
+    // register remote appchain ID in direct mode, invoked by appchain admin
+    function registerAppchain(string memory chainID, string memory broker, address ruleAddr, bytes memory trustRoot) public onlyAdmin {
+        require(appchains[chainID].exist == false, "this appchain has already been registered");
+        // require(rule.length != 0, "validate rule should not be empty");
+
+        appchains[chainID] = Appchain(chainID, broker, trustRoot, ruleAddr, 1, true);
+    }
+
     // register service ID from counterparty appchain in direct mode, invoked by appchain admin
     // serviceID: the service from counterparty appchain which will call service on current appchain
-    // banList：service list on current appchain which are not allowed to be called by remote service
-    function registerCounterParty(string memory serviceID, address[] memory banList) public onlyAdmin {
-        remoteWhiteList[serviceID] = banList;
-        remoteServices.push(serviceID);
+    // whiteList：service list on current appchain which are allowed to be called by remote service
+    function registerRemoteService(string memory chainID, string memory serviceID, address[] memory whiteList) public onlyAdmin {
+        require(appchains[chainID].exist == true, "this appchain is not registered");
+        require(appchains[chainID].status == 1, "the appchain's status is not available");
+
+        string memory fullServiceID = genRemoteFullServiceID(chainID, serviceID);
+        remoteWhiteList[fullServiceID] = whiteList;
+        remoteServices.push(fullServiceID);
+    }
+
+    function getAppchainInfo(string memory chainID) public view returns (string memory, bytes memory, address) {
+        Appchain memory appchain = appchains[chainID];
+
+        require(appchain.exist == true, "this appchain is not registered");
+
+        return (appchain.broker, appchain.trustRoot, appchain.ruleAddr);
     }
 
     // get the registered local service list
@@ -223,7 +258,7 @@ contract Broker {
         bytes[] memory result;
         if (txStatus == 0) {
             // INTERCHAIN && BEGIN
-             (status, result) = callService(destAddr, callFunc, args, false);
+            (status, result) = callService(destAddr, callFunc, args, false);
             invokeIndexUpdate(srcFullID, dstFullID, index, 0);
         } else {
             // INTERCHAIN && FAILURE || INTERCHAIN && ROLLBACK, only happened in relay mode
@@ -434,6 +469,10 @@ contract Broker {
         return (inServicePairs, indices);
     }
 
+    function genRemoteFullServiceID(string memory chainID, string memory serviceID) public view returns (string memory) {
+        return string(abi.encodePacked(":", chainID, ":", serviceID));
+    }
+
     function genFullServiceID(string memory serviceID) public view returns (string memory) {
         return string(abi.encodePacked(bitxhubID, ":", appchainID, ":", serviceID));
     }
@@ -562,7 +601,6 @@ contract Broker {
 
         return false;
     }
-
 
     function splitSignature(bytes memory sig) internal pure returns (uint8 v, bytes32 r, bytes32 s) {
         assembly {
