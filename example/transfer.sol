@@ -4,13 +4,16 @@ pragma experimental ABIEncoderV2;
 contract Transfer {
     mapping(string => uint64) accountM; // map for accounts
     // change the address of Broker accordingly
-    address BrokerAddr = 0xc9F052a8e085f4c78936939BE725Bc7ce0f57a79;
-    Broker broker = Broker(BrokerAddr);
+    address BrokerAddr;
 
     // AccessControl
     modifier onlyBroker {
         require(msg.sender == BrokerAddr, "Invoker are not the Broker");
         _;
+    }
+
+    constructor(address _brokerAddr) public {
+        BrokerAddr = _brokerAddr;
     }
 
     // contract for asset
@@ -27,7 +30,7 @@ contract Transfer {
         argsRb[0] = abi.encodePacked(sender);
         argsRb[1] = abi.encodePacked(amount);
 
-        broker.emitInterchainEvent(destChainServiceID, "interchainCharge", args, "", new bytes[](0), "interchainRollback", argsRb, false);
+        Broker(BrokerAddr).emitInterchainEvent(destChainServiceID, "interchainCharge", args, "", new bytes[](0), "interchainRollback", argsRb, false);
     }
 
     function interchainRollback(bytes[] memory args) public onlyBroker {
