@@ -4,13 +4,16 @@ pragma experimental ABIEncoderV2;
 contract DataSwapper {
     mapping(string => string) dataM; // map for accounts
     // change the address of Broker accordingly
-    address BrokerAddr = 0x9d7745Ff99bF08F66664e1417104360b390b8D1e;
-    Broker broker = Broker(BrokerAddr);
+    address BrokerAddr;
 
     // AccessControl
     modifier onlyBroker {
         require(msg.sender == BrokerAddr, "Invoker are not the Broker");
         _;
+    }
+
+    constructor(address _brokerAddr) public {
+        BrokerAddr = _brokerAddr;
     }
 
     // contract for data exchange
@@ -25,7 +28,7 @@ contract DataSwapper {
         bytes[] memory argsCb = new bytes[](1);
         argsCb[0] = abi.encodePacked(key);
 
-        broker.emitInterchainEvent(destChainServiceID, "interchainGet", args, "interchainSet", argsCb, "", new bytes[](0), false);
+        Broker(BrokerAddr).emitInterchainEvent(destChainServiceID, "interchainGet", args, "interchainSet", argsCb, "", new bytes[](0), false);
     }
 
     function set(string memory key, string memory value) public {
