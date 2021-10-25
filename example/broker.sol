@@ -58,6 +58,7 @@ contract Broker {
 
     event throwInterchainEvent(uint64 index, string dstFullID, string srcFullID, string func, bytes[] args, bytes32 hash);
     event throwReceiptEvent(uint64 index, string dstFullID, string srcFullID, bool status, bytes[] result, bytes32 hash);
+    event throwReceiptStatus(bool);
 
     string[] outServicePairs;
     string[] inServicePairs;
@@ -315,7 +316,7 @@ contract Broker {
                 isRollback = true;
             }
         } else {
-            if (txStatus != 0 && txStatus != 1) {
+            if (txStatus != 0 && txStatus != 3) {
                 isRollback = true;
             }
         }
@@ -323,25 +324,35 @@ contract Broker {
         invokeIndexUpdate(srcFullID, dstFullID, index, 1);
 
         checkReceiptMultiSigns(srcFullID, dstFullID, index, typ, result, txStatus, signatures);
-
+        
         string memory outServicePair = genServicePair(srcFullID, dstFullID);
         CallFunc memory invokeFunc = outMessages[outServicePair][index].callback;
-        bytes[] memory args = invokeFunc.args;
+        bytes[] memory args = new bytes[](invokeFunc.args.length + result.length);
+        
         if (isRollback) {
             invokeFunc = outMessages[outServicePair][index].rollback;
-            args = new bytes[](invokeFunc.args.length + result.length);
-            for (uint i = 0; i < invokeFunc.args.length; i++) {
-                args[i] = invokeFunc.args[i];
-            }
+            args = new bytes[](invokeFunc.args.length);
+        }
+        
+        for (uint i = 0; i < invokeFunc.args.length; i++) {
+            args[i] = invokeFunc.args[i];
+        }
+        
+        if (!isRollback) {
             for (uint i = 0; i < result.length; i++) {
                 args[invokeFunc.args.length + i] = result[i];
             }
         }
 
         if (keccak256(abi.encodePacked(invokeFunc.func)) != keccak256(abi.encodePacked(""))) {
+            
             string memory method = string(abi.encodePacked(invokeFunc.func, "(bytes[])"));
-            address(srcAddr).call(abi.encodeWithSignature(method, args));
+            (bool ok, bytes memory status) = address(srcAddr).call(abi.encodeWithSignature(method, args));
+            emit throwReceiptStatus(ok);
+            return;
         }
+        
+        emit throwReceiptStatus(true);
     }
 
     function invokeIndexUpdate(string memory srcFullID, string memory dstFullID, uint64 index, uint64 reqType) private {
@@ -520,7 +531,7 @@ contract Broker {
         bytes[] memory args,
         uint64 txStatus,
         bytes[] memory multiSignatures) internal {
-        if (adminThreshold == 0) {
+        if (valThreshold == 0) {
             return;
         }
 
@@ -542,13 +553,13 @@ contract Broker {
         bytes[] memory result,
         uint64 txStatus,
         bytes[] memory multiSignatures) internal {
-        if (adminThreshold == 0) {
+        if (valThreshold == 0) {
             return;
         }
 
         bytes memory packed = abi.encodePacked(srcFullID, dstFullID, index, typ);
         bytes memory data;
-        if (typ == 0 && txStatus == 3) {
+        if (typ == 0) {
             string memory outServicePair = genServicePair(srcFullID, dstFullID);
             CallFunc memory callFunc = outMessages[outServicePair][index].callFunc;
             data = abi.encodePacked(data, callFunc.func);
