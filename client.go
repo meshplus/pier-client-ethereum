@@ -290,13 +290,13 @@ func (c *Client) GetOutMessage(servicePair string, idx uint64) (*pb.IBTP, error)
 func (c *Client) GetReceiptMessage(servicePair string, idx uint64) (*pb.IBTP, error) {
 	var (
 		data    [][]byte
-		status  bool
+		typ     uint64
 		encrypt bool
 	)
 
 	if err := retry.Retry(func(attempt uint) error {
 		var err error
-		data, status, encrypt, err = c.session.GetReceiptMessage(servicePair, idx)
+		data, typ, encrypt, err = c.session.GetReceiptMessage(servicePair, idx)
 		if err != nil {
 			logger.Error("get receipt message", "servicePair", servicePair, "err", err.Error())
 		}
@@ -311,7 +311,7 @@ func (c *Client) GetReceiptMessage(servicePair string, idx uint64) (*pb.IBTP, er
 		return nil, err
 	}
 
-	return generateReceipt(srcServiceID, dstServiceID, idx, data, status, encrypt)
+	return generateReceipt(srcServiceID, dstServiceID, idx, data, typ, encrypt)
 }
 
 // GetInMeta queries contract about how many interchain txs have been

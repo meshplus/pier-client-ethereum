@@ -23,7 +23,7 @@ contract Broker {
 
     struct Receipt {
         bool encrypt;
-        bool status;
+        uint64 typ;
         bytes[] result;
     }
 
@@ -57,7 +57,7 @@ contract Broker {
     address[] bxhSigners;
 
     event throwInterchainEvent(uint64 index, string dstFullID, string srcFullID, string func, bytes[] args, bytes32 hash);
-    event throwReceiptEvent(uint64 index, string dstFullID, string srcFullID, bool status, bytes[] result, bytes32 hash);
+    event throwReceiptEvent(uint64 index, string dstFullID, string srcFullID, uint64 typ, bool status, bytes[] result, bytes32 hash);
     event throwReceiptStatus(bool);
 
     string[] outServicePairs;
@@ -261,20 +261,30 @@ contract Broker {
             // INTERCHAIN && BEGIN
             (status, result) = callService(destAddr, callFunc, args, false);
             invokeIndexUpdate(srcFullID, dstFullID, index, 0);
+            if (status) {
+                typ = 1;
+            } else {
+                typ = 2;
+            }
         } else {
             // INTERCHAIN && FAILURE || INTERCHAIN && ROLLBACK, only happened in relay mode
             if (inCounter[servicePair] >= index) {
                 (status, result) = callService(destAddr, callFunc, args, true);
             }
             invokeIndexUpdate(srcFullID, dstFullID, index, 2);
+            if (txStatus == 1) {
+                typ = 2;
+            } else {
+                typ = 3;
+            }
         }
 
-        receiptMessages[genServicePair(srcFullID, dstFullID)][index] = Receipt(isEncrypt, status, result);
+        receiptMessages[servicePair][index] = Receipt(isEncrypt, typ, result);
 
         if (isEncrypt) {
-            emit throwReceiptEvent(index, dstFullID, srcFullID, status, new bytes[](0), computeHash(result));
+            emit throwReceiptEvent(index, dstFullID, srcFullID, typ, status, new bytes[](0), computeHash(result));
         } else {
-            emit throwReceiptEvent(index, dstFullID, srcFullID, status, result, computeHash(result));
+            emit throwReceiptEvent(index, dstFullID, srcFullID, typ, status, result, computeHash(result));
         }
     }
 
@@ -448,9 +458,9 @@ contract Broker {
         return (invoke.callFunc.func, invoke.callFunc.args, invoke.encrypt);
     }
 
-    function getReceiptMessage(string memory inServicePair, uint64 idx) public view returns (bytes[] memory, bool, bool)  {
+    function getReceiptMessage(string memory inServicePair, uint64 idx) public view returns (bytes[] memory, uint64, bool)  {
         Receipt memory receipt = receiptMessages[inServicePair][idx];
-        return (receipt.result, receipt.status, receipt.encrypt);
+        return (receipt.result, receipt.typ, receipt.encrypt);
     }
 
     function getInnerMeta() public view returns (string[] memory, uint64[] memory) {
