@@ -35,7 +35,7 @@ func (c *Client) Convert2Receipt(ev *BrokerThrowReceiptEvent) (*pb.IBTP, error) 
 		return nil, err
 	}
 
-	return generateReceipt(fullEv.SrcFullID, fullEv.DstFullID, fullEv.Index, fullEv.Result, fullEv.Status, encrypt)
+	return generateReceipt(fullEv.SrcFullID, fullEv.DstFullID, fullEv.Index, fullEv.Result, fullEv.Typ, encrypt)
 }
 
 func encodePayload(ev *BrokerThrowInterchainEvent, encrypt bool) ([]byte, error) {
@@ -89,12 +89,12 @@ func (c *Client) fillInterchainEvent(ev *BrokerThrowInterchainEvent) (*BrokerThr
 
 func (c *Client) fillReceiptEvent(ev *BrokerThrowReceiptEvent) (*BrokerThrowReceiptEvent, bool, error) {
 	if ev.Result == nil {
-		result, status, encrypt, err := c.session.GetReceiptMessage(pb.GenServicePair(ev.SrcFullID, ev.DstFullID), ev.Index)
+		result, typ, encrypt, err := c.session.GetReceiptMessage(pb.GenServicePair(ev.SrcFullID, ev.DstFullID), ev.Index)
 		if err != nil {
 			return nil, false, err
 		}
 		ev.Result = result
-		ev.Status = status
+		ev.Typ = typ
 
 		emptyHash := common.Hash{}
 		if bytes.Equal(ev.Hash[:], emptyHash[:]) {
