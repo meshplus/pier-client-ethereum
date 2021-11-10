@@ -131,7 +131,7 @@ contract Broker {
         string memory args,
         string memory argscb,
         string memory argsrb)
-    public onlyWhiteList {
+    public {
         // Record the order of interchain contract which has been started.
         outCounter[destChainID]++;
         if (outCounter[destChainID] == 1) {
