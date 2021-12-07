@@ -251,14 +251,14 @@ contract Broker {
         string memory dstFullID = genFullServiceID(addressToString(destAddr));
         string memory servicePair = genServicePair(srcFullID, dstFullID);
 
-        checkService(srcFullID, destAddr);
-
         checkInterchainMultiSigns(srcFullID, dstFullID, index, typ, callFunc, args, txStatus, signatures);
 
         bool status = true;
         bytes[] memory result;
         if (txStatus == 0) {
             // INTERCHAIN && BEGIN
+            checkService(srcFullID, destAddr);
+
             (status, result) = callService(destAddr, callFunc, args, false);
             invokeIndexUpdate(srcFullID, dstFullID, index, 0);
             if (status) {
@@ -269,6 +269,7 @@ contract Broker {
         } else {
             // INTERCHAIN && FAILURE || INTERCHAIN && ROLLBACK, only happened in relay mode
             if (inCounter[servicePair] >= index) {
+                checkService(srcFullID, destAddr);
                 (status, result) = callService(destAddr, callFunc, args, true);
             }
             invokeIndexUpdate(srcFullID, dstFullID, index, 2);
