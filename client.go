@@ -151,6 +151,13 @@ func (c *Client) Type() string {
 // them to other modules.
 func (c *Client) SubmitIBTP(from string, index uint64, serviceID string, ibtpType pb.IBTP_Type, content *pb.Content, proof *pb.BxhProof, isEncrypted bool) (*pb.SubmitIBTPResponse, error) {
 	ret := &pb.SubmitIBTPResponse{Status: true}
+	if 0 != strings.Compare(common.HexToAddress(serviceID).Hex(), serviceID) {
+		logger.Warn("destAddr checkSum failed",
+			"destAddr", serviceID,
+			"destCheckSumAddr", common.HexToAddress(serviceID).Hex(),
+		)
+		return ret, nil
+	}
 	receipt, err := c.invokeInterchain(from, index, serviceID, uint64(ibtpType), content.Func, content.Args, uint64(proof.TxStatus), proof.MultiSign, isEncrypted)
 	if err != nil {
 		ret.Status = false
