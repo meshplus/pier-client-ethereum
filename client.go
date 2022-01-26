@@ -156,6 +156,7 @@ func (c *Client) SubmitIBTP(from string, index uint64, serviceID string, ibtpTyp
 			"destAddr", serviceID,
 			"destCheckSumAddr", common.HexToAddress(serviceID).Hex(),
 		)
+		ret.Status = false
 		return ret, nil
 	}
 	receipt, err := c.invokeInterchain(from, index, serviceID, uint64(ibtpType), content.Func, content.Args, uint64(proof.TxStatus), proof.MultiSign, isEncrypted)
