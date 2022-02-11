@@ -1,4 +1,4 @@
-pragma solidity >=0.5.7;
+pragma solidity >=0.6.9 <=0.7.6;
 pragma experimental ABIEncoderV2;
 
 contract Broker {
@@ -238,8 +238,10 @@ contract Broker {
     }
 
     // called on dest chain
-    function invokeInterchain(string memory srcFullID,
-        address destAddr,
+    function invokeInterchain(
+        string memory srcFullID,
+        // 地址变为string格式，这样多签不会有问题，在验证多签之前使用checksum之前的合约地址
+        string memory destAddr,
         uint64 index,
         uint64 typ,
         string memory callFunc,
@@ -247,19 +249,20 @@ contract Broker {
         uint64 txStatus,
         bytes[] memory signatures,
         bool isEncrypt) payable external {
+
         // bool isRollback = false;
-        string memory dstFullID = genFullServiceID(addressToString(destAddr));
+        string memory dstFullID = genFullServiceID(destAddr);
         string memory servicePair = genServicePair(srcFullID, dstFullID);
 
         checkInterchainMultiSigns(srcFullID, dstFullID, index, typ, callFunc, args, txStatus, signatures);
-
+        //address _destAddr = stringToAddress(destAddr);
         bool status = true;
         bytes[] memory result;
         if (txStatus == 0) {
             // INTERCHAIN && BEGIN
-            checkService(srcFullID, destAddr);
+            checkService(srcFullID, stringToAddress(destAddr));
 
-            (status, result) = callService(destAddr, callFunc, args, false);
+            (status, result) = callService(stringToAddress(destAddr), callFunc, args, false);
             invokeIndexUpdate(srcFullID, dstFullID, index, 0);
             if (status) {
                 typ = 1;
@@ -269,8 +272,8 @@ contract Broker {
         } else {
             // INTERCHAIN && FAILURE || INTERCHAIN && ROLLBACK, only happened in relay mode
             if (inCounter[servicePair] >= index) {
-                checkService(srcFullID, destAddr);
-                (status, result) = callService(destAddr, callFunc, args, true);
+                checkService(srcFullID, stringToAddress(destAddr));
+                (status, result) = callService(stringToAddress(destAddr), callFunc, args, true);
             }
             invokeIndexUpdate(srcFullID, dstFullID, index, 2);
             if (txStatus == 1) {
@@ -312,14 +315,15 @@ contract Broker {
     }
 
     // called on src chain
-    function invokeReceipt(address srcAddr,
+    function invokeReceipt(
+        string memory srcAddr,
         string memory dstFullID,
         uint64 index,
         uint64 typ,
         bytes[] memory result,
         uint64 txStatus,
         bytes[] memory signatures) payable external {
-        string memory srcFullID = genFullServiceID(addressToString(srcAddr));
+        string memory srcFullID = genFullServiceID(srcAddr);
         bool isRollback = false;
         if (validators.length == 0) {
             require(typ == 1 || typ == 2, "IBTP type is not correct in direct mode");
@@ -335,20 +339,20 @@ contract Broker {
         invokeIndexUpdate(srcFullID, dstFullID, index, 1);
 
         checkReceiptMultiSigns(srcFullID, dstFullID, index, typ, result, txStatus, signatures);
-        
+
         string memory outServicePair = genServicePair(srcFullID, dstFullID);
         CallFunc memory invokeFunc = outMessages[outServicePair][index].callback;
         bytes[] memory args = new bytes[](invokeFunc.args.length + result.length);
-        
+
         if (isRollback) {
             invokeFunc = outMessages[outServicePair][index].rollback;
             args = new bytes[](invokeFunc.args.length);
         }
-        
+
         for (uint i = 0; i < invokeFunc.args.length; i++) {
             args[i] = invokeFunc.args[i];
         }
-        
+
         if (!isRollback) {
             for (uint i = 0; i < result.length; i++) {
                 args[invokeFunc.args.length + i] = result[i];
@@ -356,13 +360,13 @@ contract Broker {
         }
 
         if (keccak256(abi.encodePacked(invokeFunc.func)) != keccak256(abi.encodePacked(""))) {
-            
+
             string memory method = string(abi.encodePacked(invokeFunc.func, "(bytes[])"));
-            (bool ok, bytes memory status) = address(srcAddr).call(abi.encodeWithSignature(method, args));
+            (bool ok, bytes memory status) = address(stringToAddress(srcAddr)).call(abi.encodeWithSignature(method, args));
             emit throwReceiptStatus(ok);
             return;
         }
-        
+
         emit throwReceiptStatus(true);
     }
 
@@ -397,6 +401,29 @@ contract Broker {
     public onlyWhiteList {
         string memory curFullID = genFullServiceID(addressToString(msg.sender));
         string memory outServicePair = genServicePair(curFullID, destFullServiceID);
+
+        // 直连模式下未注册的remoteService无法发出跨链交易
+        if (valThreshold == 0) {
+            // direct mode
+            bool flag = false;
+            for (uint i = 0; i < remoteServices.length; i++) {
+                if (keccak256(abi.encodePacked(destFullServiceID)) == keccak256(abi.encodePacked(remoteServices[i]))) {
+                    flag = true;
+                    break;
+                }
+            }
+            require(flag == true, "remote service is not registered");
+            flag = false;
+            address[] memory banList = remoteWhiteList[destFullServiceID];
+            for (uint i = 0; i < banList.length; i++) {
+                if (msg.sender == banList[i]) {
+                    flag = true;
+                    break;
+                }
+            }
+            require(flag == false, "remote service is not allowed to call dest address");
+        }
+
 
         // Record the order of interchain contract which has been started.
         outCounter[outServicePair]++;
@@ -757,6 +784,38 @@ contract Broker {
         }
 
         return string(asciiBytes);
+    }
+    function stringToAddress(string memory _address) internal pure returns (address) {
+        bytes memory temp = bytes(_address);
+        if(temp.length != 42) {
+            revert(string(abi.encodePacked(_address, " is not a valid address")));
+        }
+
+        uint160 result = 0;
+        uint160 b1;
+        uint160 b2;
+        for (uint256 i = 2; i < 2 + 2 * 20; i += 2) {
+            result *= 256;
+            b1 = uint160(uint8(temp[i]));
+            b2 = uint160(uint8(temp[i + 1]));
+            if ((b1 >= 97) && (b1 <= 102)) {
+                b1 -= 87;
+            } else if ((b1 >= 65) && (b1 <= 70)) {
+                b1 -= 55;
+            } else if ((b1 >= 48) && (b1 <= 57)) {
+                b1 -= 48;
+            }
+
+            if ((b2 >= 97) && (b2 <= 102)) {
+                b2 -= 87;
+            } else if ((b2 >= 65) && (b2 <= 70)) {
+                b2 -= 55;
+            } else if ((b2 >= 48) && (b2 <= 57)) {
+                b2 -= 48;
+            }
+            result += (b1 * 16 + b2);
+        }
+        return address(result);
     }
 
 
