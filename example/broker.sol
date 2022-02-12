@@ -138,13 +138,14 @@ contract Broker {
     }
 
     // register local service to Broker
-    function register(address addr) public {
-        if (localWhiteList[addr] || localServiceProposal[addr].exist) {
+    function register() public {
+        require(tx.origin != msg.sender, "register not by contract");
+        if (localWhiteList[msg.sender] || localServiceProposal[msg.sender].exist) {
             return;
         }
 
         address[] memory votedAdmins = new address[](admins.length);
-        localServiceProposal[addr] = Proposal(0, 0, votedAdmins, true);
+        localServiceProposal[msg.sender] = Proposal(0, 0, votedAdmins, true);
     }
 
     function audit(address addr, int64 status) public onlyAdmin returns (bool) {
@@ -210,6 +211,7 @@ contract Broker {
         require(appchains[chainID].status == 1, "the appchain's status is not available");
 
         string memory fullServiceID = genRemoteFullServiceID(chainID, serviceID);
+        // todo whiteList是否存在于当前audit中
         remoteWhiteList[fullServiceID] = whiteList;
         remoteServices.push(fullServiceID);
     }
@@ -236,6 +238,17 @@ contract Broker {
     function getRemoteServiceList() public view returns (string[] memory) {
         return remoteServices;
     }
+
+    // get the registered counterparty service list
+    function getRSWhiteList(string memory remoteAddr) public view returns (address[] memory) {
+        return remoteWhiteList[remoteAddr];
+    }
+
+    // get the registered counterparty service list
+    function getLocalWhiteList(address addr) public view returns (bool) {
+        return localWhiteList[addr];
+    }
+    
 
     // called on dest chain
     function invokeInterchain(
@@ -557,7 +570,7 @@ contract Broker {
                     break;
                 }
             }
-            require(flag == false, "remote service is not allowed to call dest address");
+            require(flag == true, "remote service is not allowed to call dest address");
         }
     }
 
@@ -785,7 +798,7 @@ contract Broker {
 
         return string(asciiBytes);
     }
-    function stringToAddress(string memory _address) internal pure returns (address) {
+    function stringToAddress(string memory _address) public pure returns (address) {
         bytes memory temp = bytes(_address);
         if(temp.length != 42) {
             revert(string(abi.encodePacked(_address, " is not a valid address")));

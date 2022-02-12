@@ -14,6 +14,7 @@ contract DataSwapper {
 
     constructor(address _brokerAddr) public {
         BrokerAddr = _brokerAddr;
+        Broker(BrokerAddr).register();
     }
 
     // contract for data exchange
@@ -63,4 +64,6 @@ abstract contract Broker {
         string memory funcRb,
         bytes[] memory argsRb,
         bool isEncrypt) public virtual;
+
+    function register() public virtual;
 }

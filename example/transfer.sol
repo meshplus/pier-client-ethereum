@@ -14,6 +14,7 @@ contract Transfer {
 
     constructor(address _brokerAddr) public {
         BrokerAddr = _brokerAddr;
+        Broker(BrokerAddr).register();
     }
 
     // contract for asset
@@ -81,4 +82,6 @@ abstract contract Broker {
         string memory funcRb,
         bytes[] memory argsRb,
         bool isEncrypt) public virtual;
+
+    function register() public virtual;
 }
