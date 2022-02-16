@@ -17,6 +17,10 @@ contract DataSwapper {
         Broker(BrokerAddr).register();
     }
 
+    function register() public {
+        Broker(BrokerAddr).register();
+    }
+
     // contract for data exchange
     function getData(string memory key) public view returns(string memory) {
         return dataM[key];

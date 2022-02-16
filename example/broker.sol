@@ -412,6 +412,7 @@ contract Broker {
         bytes[] memory argsRb,
         bool isEncrypt)
     public onlyWhiteList {
+        checkAppchainIdContains(appchainID, destFullServiceID);
         string memory curFullID = genFullServiceID(addressToString(msg.sender));
         string memory outServicePair = genServicePair(curFullID, destFullServiceID);
 
@@ -836,4 +837,27 @@ contract Broker {
         if (uint8(b) < 10) return bytes1(uint8(b) + 0x30);
         else return bytes1(uint8(b) + 0x57);
     }
+
+    function checkAppchainIdContains (string memory appchainId, string memory destFullService) internal{
+        bytes memory whatBytes = bytes (appchainId);
+        bytes memory whereBytes = bytes (destFullService);
+
+        require(whereBytes.length >= whatBytes.length);
+
+        bool found = false;
+        for (uint i = 0; i <= whereBytes.length - whatBytes.length; i++) {
+            bool flag = true;
+         for (uint j = 0; j < whatBytes.length; j++)
+             if (whereBytes [i + j] != whatBytes [j]) {
+                    flag = false;
+                    break;
+                }
+         if (flag) {
+             found = true;
+             break;
+         }
+        }
+        // 不允许同broker服务自跨链
+        require(!found, "dest service is belong to current broker!");
+}
 }
