@@ -407,6 +407,15 @@ func (c *Client) GetDstRollbackMeta() (map[string]uint64, error) {
 	return c.getMeta(c.session.GetDstRollbackMeta)
 }
 
+func (c *Client) GetTransactionMeta(IBTPid string) (uint64, uint64, error) {
+	timestamp, err := c.session.GetStartTimeStamp(IBTPid)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	return timestamp.Uint64(), c.config.Ether.TimeoutHeight, nil
+}
+
 func (c *Client) GetChainID() (string, string, error) {
 	return c.session.GetChainID()
 }

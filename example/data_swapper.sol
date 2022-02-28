@@ -29,7 +29,7 @@ contract DataSwapper {
     function get(string memory destChainServiceID, string memory key) public {
         bytes[] memory args = new bytes[](1);
         args[0] = abi.encodePacked(key);
-        
+
         bytes[] memory argsCb = new bytes[](1);
         argsCb[0] = abi.encodePacked(key);
 
@@ -50,10 +50,10 @@ contract DataSwapper {
     function interchainGet(bytes[] memory args, bool isRollback) public onlyBroker returns(bytes[] memory) {
         require(args.length == 1, "interchainGet args' length is not correct, expect 1");
         string memory key = string(args[0]);
-        
+
         bytes[] memory result = new bytes[](1);
         result[0] = abi.encodePacked(dataM[key]);
-        
+
         return result;
     }
 }
