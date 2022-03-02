@@ -658,8 +658,8 @@ github.com/meshplus/bitxhub-model v1.2.1-0.20220228011913-bd86e5f34ea7 h1:soFPx9
 github.com/meshplus/bitxhub-model v1.2.1-0.20220228011913-bd86e5f34ea7/go.mod h1:sPko8fD+G3MYOnH/44Ju4T4jD/tlEU3IJDIJ4hjrzxg=
 github.com/meshplus/go-bitxhub-client v1.4.1-0.20210902103117-4a8dcc2e8c18/go.mod h1:KglKCyj1sV1CUvGJqhZNf575HFhJSrDTMjd5jKppDVQ=
 github.com/meshplus/go-lightp2p v0.0.0-20200817105923-6b3aee40fa54/go.mod h1:G89UJaeqCQFxFdp8wzy1AdKfMtDEhpySau0pjDNeeaw=
-github.com/meshplus/pier v1.12.1-0.20220228012256-6cc5562ecbcb h1:uf9V6JvedY5fTvqiVWxrS3Akw8DxVttizw3lxdx4tOY=
-github.com/meshplus/pier v1.12.1-0.20220228012256-6cc5562ecbcb/go.mod h1:ryDFBTME/ooPHEQz+6bTdpIrvVycsN+AlyVvAfnfQps=
+github.com/meshplus/pier v1.12.1-0.20220302060956-b659d92feb29 h1:iCyqx8o3WVsXSFGH04kHDVpnIWupMZN5a8BydYZiLQo=
+github.com/meshplus/pier v1.12.1-0.20220302060956-b659d92feb29/go.mod h1:ryDFBTME/ooPHEQz+6bTdpIrvVycsN+AlyVvAfnfQps=
 github.com/mgutz/ansi v0.0.0-20170206155736-9520e82c474b/go.mod h1:01TrycV0kFyexm33Z7vhZRXopbI8J3TDReVlkTgMUxE=
 github.com/miekg/dns v1.0.14/go.mod h1:W1PPwlIAgtquWBMBEV9nkV9Cazfe8ScdGz/Lj7v3Nrg=
 github.com/miekg/dns v1.1.12/go.mod h1:W1PPwlIAgtquWBMBEV9nkV9Cazfe8ScdGz/Lj7v3Nrg=
