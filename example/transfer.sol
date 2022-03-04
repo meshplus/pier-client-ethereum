@@ -17,6 +17,10 @@ contract Transfer {
         Broker(BrokerAddr).register();
     }
 
+    function register() public {
+        Broker(BrokerAddr).register();
+    }
+
     // contract for asset
     function transfer(string memory destChainServiceID, string memory sender, string memory receiver, uint64 amount) public {
         require(accountM[sender] >= amount);
