@@ -137,7 +137,10 @@ contract Broker {
         delete localServices;
 //        delete remoteServices;
 //        delete appchainIDs;
-        Transaction(transactionAddr).initialize();
+        if (valThreshold == 0) {
+            // direct mode
+            Transaction(transactionAddr).initialize();
+        }
     }
 
     // set transaction management contract address in direct mode
