@@ -151,14 +151,14 @@ func (c *Client) Type() string {
 // them to other modules.
 func (c *Client) SubmitIBTP(from string, index uint64, serviceID string, ibtpType pb.IBTP_Type, content *pb.Content, proof *pb.BxhProof, isEncrypted bool) (*pb.SubmitIBTPResponse, error) {
 	ret := &pb.SubmitIBTPResponse{Status: true}
-	if 0 != strings.Compare(common.HexToAddress(serviceID).Hex(), serviceID) {
-		logger.Warn("destAddr checkSum failed",
-			"destAddr", serviceID,
-			"destCheckSumAddr", common.HexToAddress(serviceID).Hex(),
-		)
-		ret.Status = false
-		return ret, nil
-	}
+	//if 0 != strings.Compare(common.HexToAddress(serviceID).Hex(), serviceID) {
+	//	logger.Warn("destAddr checkSum failed",
+	//		"destAddr", serviceID,
+	//		"destCheckSumAddr", common.HexToAddress(serviceID).Hex(),
+	//	)
+	//	ret.Status = false
+	//	return ret, nil
+	//}
 	receipt, err := c.invokeInterchain(from, index, serviceID, uint64(ibtpType), content.Func, content.Args, uint64(proof.TxStatus), proof.MultiSign, isEncrypted)
 	if err != nil {
 		ret.Status = false
@@ -196,7 +196,7 @@ func (c *Client) invokeInterchain(srcFullID string, index uint64, destAddr strin
 	var tx *types.Transaction
 	var txErr error
 	if err := retry.Retry(func(attempt uint) error {
-		tx, txErr = c.session.InvokeInterchain(srcFullID, common.HexToAddress(destAddr), index, reqType, callFunc, args, txStatus, multiSign, encrypt)
+		tx, txErr = c.session.InvokeInterchain(srcFullID, destAddr, index, reqType, callFunc, args, txStatus, multiSign, encrypt)
 		if txErr != nil {
 			logger.Warn("Call InvokeInterchain failed",
 				"srcFullID", srcFullID,
@@ -240,7 +240,7 @@ func (c *Client) invokeReceipt(srcAddr string, dstFullID string, index uint64, r
 	var tx *types.Transaction
 	var txErr error
 	if err := retry.Retry(func(attempt uint) error {
-		tx, txErr = c.session.InvokeReceipt(common.HexToAddress(srcAddr), dstFullID, index, reqType, result, txStatus, multiSign)
+		tx, txErr = c.session.InvokeReceipt(srcAddr, dstFullID, index, reqType, result, txStatus, multiSign)
 		if txErr != nil {
 			logger.Warn("Call InvokeReceipt failed",
 				"srcAddr", srcAddr,
@@ -405,6 +405,15 @@ func (c *Client) waitForConfirmed(hash common.Hash) *types.Receipt {
 
 func (c *Client) GetDstRollbackMeta() (map[string]uint64, error) {
 	return c.getMeta(c.session.GetDstRollbackMeta)
+}
+
+func (c *Client) GetTransactionMeta(IBTPid string) (uint64, uint64, error) {
+	timestamp, err := c.session.GetStartTimeStamp(IBTPid)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	return timestamp.Uint64(), c.config.Ether.TimeoutHeight, nil
 }
 
 func (c *Client) GetChainID() (string, string, error) {

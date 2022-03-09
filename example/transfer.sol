@@ -14,6 +14,11 @@ contract Transfer {
 
     constructor(address _brokerAddr) public {
         BrokerAddr = _brokerAddr;
+        Broker(BrokerAddr).register();
+    }
+
+    function register() public {
+        Broker(BrokerAddr).register();
     }
 
     // contract for asset
@@ -25,7 +30,7 @@ contract Transfer {
         args[0] = abi.encodePacked(sender);
         args[1] =abi.encodePacked(receiver);
         args[2] = abi.encodePacked(amount);
-        
+
         bytes[] memory argsRb = new bytes[](2);
         argsRb[0] = abi.encodePacked(sender);
         argsRb[1] = abi.encodePacked(amount);
@@ -44,13 +49,13 @@ contract Transfer {
         require(args.length == 3, "interchainCharge args' length is not correct, expect 3");
         string memory receiver = string(args[1]);
         uint64 amount = bytesToUint64(args[2]);
-        
+
         if (!isRollback) {
             accountM[receiver] += amount;
         } else {
             accountM[receiver] -= amount;
         }
-        
+
         return new bytes[](0);
     }
 
@@ -61,7 +66,7 @@ contract Transfer {
     function setBalance(string memory id, uint64 amount) public {
         accountM[id] = amount;
     }
-    
+
     function bytesToUint64(bytes memory b) public pure returns (uint64){
         uint64 number;
         for(uint i=0;i<b.length;i++){
@@ -81,4 +86,6 @@ abstract contract Broker {
         string memory funcRb,
         bytes[] memory argsRb,
         bool isEncrypt) public virtual;
+
+    function register() public virtual;
 }
