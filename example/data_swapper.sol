@@ -13,7 +13,7 @@ contract DataSwapper {
     }
 
     // contract for data exchange
-    function getData(string memory key) public returns(string memory) {
+    function getData(string memory key) public view returns(string memory) {
         return dataM[key];
     }
 
