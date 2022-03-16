@@ -23,6 +23,7 @@ type Ether struct {
 	Password        string `toml:"password" json:"password"`
 	MinConfirm      uint64 `mapstructure:"min_confirm" json:"min_confirm"`
 	TimeoutHeight   uint64 `mapstructure:"timeout_height" json:"timeout_height"`
+	TimeoutPeriod   uint64 `mapstructure:"timeout_period" json:"timeout_period"`
 	ChainID         string `mapstructure:"chain_id" json:"chain_id"`
 }
 
@@ -36,6 +37,7 @@ func defaultConfig() *Config {
 			Password:        "",
 			MinConfirm:      15,
 			TimeoutHeight:   100,
+			TimeoutPeriod:   60,
 		},
 	}
 }

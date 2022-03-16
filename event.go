@@ -2,8 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/binary"
-	"fmt"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/meshplus/bitxhub-model/pb"
@@ -19,14 +17,6 @@ func (c *Client) Convert2IBTP(ev *BrokerThrowInterchainEvent, timeoutHeight int6
 		return nil, err
 	}
 
-	IBTPid := fmt.Sprintf("%s-%s-%d", ev.SrcFullID, ev.DstFullID, ev.Index)
-	timestamp, _, err := c.GetTransactionMeta(IBTPid)
-	if err != nil {
-		return nil, err
-	}
-	var buf = make([]byte, 8)
-	binary.BigEndian.PutUint64(buf, timestamp)
-
 	return &pb.IBTP{
 		From:          ev.SrcFullID,
 		To:            ev.DstFullID,
@@ -35,7 +25,6 @@ func (c *Client) Convert2IBTP(ev *BrokerThrowInterchainEvent, timeoutHeight int6
 		TimeoutHeight: timeoutHeight,
 		Proof:         []byte("1"),
 		Payload:       pd,
-		Extra:         buf,
 	}, nil
 }
 

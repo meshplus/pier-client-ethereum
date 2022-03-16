@@ -110,6 +110,8 @@ func (c *Client) Initialize(configPath string, extra []byte) error {
 		TransactOpts: *auth,
 	}
 
+	//session.TransactOpts.GasLimit = 1500000
+
 	ab, err := abi.JSON(bytes.NewReader([]byte(BrokerABI)))
 	if err != nil {
 		return fmt.Errorf("abi unmarshal: %s", err.Error())
@@ -407,13 +409,13 @@ func (c *Client) GetDstRollbackMeta() (map[string]uint64, error) {
 	return c.getMeta(c.session.GetDstRollbackMeta)
 }
 
-func (c *Client) GetTransactionMeta(IBTPid string) (uint64, uint64, error) {
-	timestamp, err := c.session.GetStartTimeStamp(IBTPid)
+func (c *Client) GetDirectTransactionMeta(IBTPid string) (uint64, uint64, uint64, error) {
+	timestamp, txStatus, err := c.session.GetDirectTransactionMeta(IBTPid)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 
-	return timestamp.Uint64(), c.config.Ether.TimeoutHeight, nil
+	return timestamp.Uint64(), c.config.Ether.TimeoutPeriod, txStatus, nil
 }
 
 func (c *Client) GetChainID() (string, string, error) {

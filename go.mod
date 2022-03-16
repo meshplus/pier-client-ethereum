@@ -11,8 +11,8 @@ require (
 	github.com/gobuffalo/packr v1.30.1
 	github.com/hashicorp/go-hclog v0.0.0-20180709165350-ff2cf002a8dd
 	github.com/hashicorp/go-plugin v1.3.0
-	github.com/meshplus/bitxhub-model v1.2.1-0.20220228011913-bd86e5f34ea7
-	github.com/meshplus/pier v1.12.1-0.20220302060956-b659d92feb29
+	github.com/meshplus/bitxhub-model v1.2.1-0.20220316053550-41f29cdca646
+	github.com/meshplus/pier v1.20.1-0.20220316053747-cf32e5fbf0d6
 	github.com/spf13/viper v1.7.1
 	github.com/urfave/cli v1.22.1
 )

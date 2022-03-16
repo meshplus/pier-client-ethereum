@@ -369,6 +369,15 @@ contract Broker {
             }
             if (typ == 2) {
                 isRollback = true;
+                Transaction(transactionAddr).endTransactionFail(srcFullID, dstFullID, index);
+            }
+            if (typ == 3) {
+                isRollback = true;
+                Transaction(transactionAddr).rollbackTransaction(srcFullID, dstFullID, index);
+            }
+            if (typ == 4) {
+                Transaction(transactionAddr).endTransactionRollback(srcFullID, dstFullID, index);
+                return;
             }
         } else {
             if (txStatus != 0 && txStatus != 3) {
@@ -568,9 +577,10 @@ contract Broker {
         return (inServicePairs, indices);
     }
 
-    // get transaction start timestamp in direct mode
-    function getStartTimeStamp(string memory id) public view returns (uint) {
-        return startTimeStamp[id];
+    // get transaction start timestamp and transaction status in direct mode
+    function getDirectTransactionMeta(string memory id) public view returns (uint, uint64) {
+        uint64 txStatus = Transaction(transactionAddr).getTransactionStatus(id);
+        return (startTimeStamp[id], txStatus);
     }
 
     function genRemoteFullServiceID(string memory chainID, string memory serviceID) public view returns (string memory) {
@@ -930,4 +940,6 @@ abstract contract Transaction {
     function endTransactionRollback(string memory from, string memory to, uint64 index) public virtual;
 
     function genIBTPid(string memory from, string memory to, uint64 index) public virtual returns (string memory);
+
+    function getTransactionStatus(string memory IBTPid) public view virtual returns (uint64);
 }
