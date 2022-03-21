@@ -6,10 +6,27 @@ contract Transfer {
     address BrokerAddr = 0x97135d4d2578dd2347FF5382db77553bE50bff3f;
     Broker broker = Broker(BrokerAddr);
 
+    string[] accountList = ["Alice", "Bob"];
+    mapping(string => bool) accountWhiteList;
+
     // AccessControl
     modifier onlyBroker {
         require(msg.sender == BrokerAddr, "Invoker are not the Broker");
         _;
+    }
+
+    constructor() public {
+        for(uint i = 0; i < accountList.length; ++i) {
+            accountWhiteList[accountList[i]] = true;
+        }
+    }
+
+    function addAccount(string memory account) public {
+        accountWhiteList[account] = true;
+    }
+
+    function removeAccount(string memory account) public {
+        accountWhiteList[account] = false;
     }
 
     // contract for asset
@@ -35,6 +52,7 @@ contract Transfer {
     }
 
     function interchainCharge(string memory sender, string memory receiver, uint64 val) public onlyBroker returns(bool) {
+        require(accountWhiteList[sender] == true, "sender account is not allowed to invoke interchain transfer");
         accountM[receiver] += val;
         return true;
     }
