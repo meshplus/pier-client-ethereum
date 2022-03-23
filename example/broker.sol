@@ -251,7 +251,9 @@ contract Broker {
             // INTERCHAIN && BEGIN
             checkService(srcFullID, stringToAddress(destAddr));
 
-            (status, result) = callService(stringToAddress(destAddr), callFunc, args, false);
+            if (inCounter[servicePair] < index) {
+                (status, result) = callService(stringToAddress(destAddr), callFunc, args, false);
+            }
             invokeIndexUpdate(srcFullID, dstFullID, index, 0);
             if (status) {
                 typ = 1;
