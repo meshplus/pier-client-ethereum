@@ -21,11 +21,14 @@ contract Transfer {
         Broker(BrokerAddr).register();
     }
 
+    function genFullServiceID(string memory destBitxhubID, string memory destAppchainID, string memory destServiceID) public view returns (string memory) {
+        return string(abi.encodePacked(destBitxhubID, ":", destAppchainID, ":", destServiceID));
+    }
     // contract for asset
-    function transfer(string memory destChainServiceID, string memory sender, string memory receiver, uint64 amount) public {
+    function transfer(string memory destBitxhubID, string memory destAppchainID, string memory destServiceID, string memory sender, string memory receiver, uint64 amount) public {
         require(accountM[sender] >= amount);
         accountM[sender] -= amount;
-
+        string memory destChainServiceID = genFullServiceID(destBitxhubID, destAppchainID, destServiceID);
         bytes[] memory args = new bytes[](3);
         args[0] = abi.encodePacked(sender);
         args[1] =abi.encodePacked(receiver);

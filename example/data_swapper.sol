@@ -26,10 +26,14 @@ contract DataSwapper {
         return dataM[key];
     }
 
-    function get(string memory destChainServiceID, string memory key) public {
+    function genFullServiceID(string memory destBitxhubID, string memory destAppchainID, string memory destServiceID) public view returns (string memory) {
+        return string(abi.encodePacked(destBitxhubID, ":", destAppchainID, ":", destServiceID));
+    }
+
+    function get(string memory destBitxhubID, string memory destAppchainID, string memory destServiceID, string memory key) public {
         bytes[] memory args = new bytes[](1);
         args[0] = abi.encodePacked(key);
-
+        string memory destChainServiceID = genFullServiceID(destAppchainID, destAppchainID, destServiceID);
         bytes[] memory argsCb = new bytes[](1);
         argsCb[0] = abi.encodePacked(key);
 
