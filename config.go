@@ -25,6 +25,7 @@ type Ether struct {
 	TimeoutHeight   uint64 `mapstructure:"timeout_height" json:"timeout_height"`
 	TimeoutPeriod   uint64 `mapstructure:"timeout_period" json:"timeout_period"`
 	ChainID         string `mapstructure:"chain_id" json:"chain_id"`
+	OffChainLimit   int    `mapstructure:"offchain_limit" json:"offchain_limit"`
 }
 
 func defaultConfig() *Config {
@@ -38,6 +39,7 @@ func defaultConfig() *Config {
 			MinConfirm:      15,
 			TimeoutHeight:   100,
 			TimeoutPeriod:   60,
+			OffChainLimit:   50,
 		},
 	}
 }
