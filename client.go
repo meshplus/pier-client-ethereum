@@ -515,6 +515,14 @@ func (c *Client) GetOffChainDataReq() chan *pb.GetDataRequest {
 
 func (c *Client) SubmitOffChainData(response *pb.GetDataResponse) error {
 	key := fmt.Sprintf("%s-%s-%d", response.From, response.To, response.Index)
+	// todo(pwz): data integrity check
+
+	// save offChain data
+	if err := ioutil.WriteFile(filepath.Join(c.config.Ether.OffChainPath, key), response.Data, 644); err != nil {
+		logger.Error("save offChain data", "error", err)
+		return err
+	}
+
 	<-c.blockCh[key]
 	return nil
 }
