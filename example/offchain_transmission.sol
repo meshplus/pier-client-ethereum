@@ -12,6 +12,8 @@ contract OffChainTransmission {
         string value;
         // 标记链上还是链下 '1':链下，'0':链上
         string isStruct;
+        // 链下数据hash，用于数据完整性校验
+        string hash;
     }
     mapping(string => Data) dataM; // map for accounts
     // change the address of Broker accordingly
@@ -33,13 +35,13 @@ contract OffChainTransmission {
     }
 
     // contract for data exchange
-    function getData(string memory key) public view returns(string memory ,string memory, string memory) {
-        return (dataM[key].key, dataM[key].value, dataM[key].isStruct);
+    function getData(string memory key) public view returns(string memory ,string memory, string memory, string memory) {
+        return (dataM[key].key, dataM[key].value, dataM[key].isStruct, dataM[key].hash);
     }
 
-    function set(string memory key, string memory value, string memory isStruct) public {
+    function set(string memory key, string memory value, string memory isStruct, string memory hash) public {
         require(keccak256(abi.encodePacked(isStruct)) == keccak256("1") || keccak256(abi.encodePacked(isStruct)) == keccak256("0"), "struct type error!");
-        dataM[key] = Data(key, value, isStruct);
+        dataM[key] = Data(key, value, isStruct, hash);
     }
 
 
@@ -47,10 +49,11 @@ contract OffChainTransmission {
     function push(string memory destChainServiceID, string memory key) public {
         bytes memory _key = abi.encodePacked(dataM[key].key);
         require(keccak256(_key) == keccak256(abi.encodePacked(key)), "set data first!");
-        bytes[] memory args = new bytes[](3);
+        bytes[] memory args = new bytes[](4);
         args[0] = abi.encodePacked(dataM[key].key);
         args[1] = abi.encodePacked(dataM[key].value);
         args[2] = abi.encodePacked(dataM[key].isStruct);
+        args[3] = abi.encodePacked(dataM[key].hash);
 
 
         bytes[] memory argsCb = new bytes[](1);
@@ -60,11 +63,12 @@ contract OffChainTransmission {
     }
 
     function interchainPush(bytes[] memory args, bool isRollback) public onlyBroker returns(bytes[] memory){
-        require(args.length == 3, "interchainPush args' length is not correct, expect 3");
+        require(args.length == 4, "interchainPush args' length is not correct, expect 3");
         string memory key = string(args[0]);
         string memory value = string(args[1]);
         string memory isStruct = string(args[2]);
-        set(key, value, isStruct);
+        string memory hash = string(args[3]);
+        set(key, value, isStruct, hash);
 
         return new bytes[](0);
     }
@@ -87,20 +91,22 @@ contract OffChainTransmission {
 
 
     function interchainSet(bytes[] memory args) public onlyBroker {
-        require(args.length == 3, "interchainSet args' length is not correct, expect 3");
+        require(args.length == 4, "interchainSet args' length is not correct, expect 3");
         string memory key = string(args[0]);
         string memory value = string(args[1]);
         string memory isStruct = string(args[2]);
-        set(key, value, isStruct);
+        string memory hash = string(args[3]);
+        set(key, value, isStruct, hash);
     }
 
     function interchainGet(bytes[] memory args, bool isRollback) public onlyBroker returns(bytes[] memory) {
         require(args.length == 1, "interchainGet args' length is not correct, expect 1");
         string memory key = string(args[0]);
 
-        bytes[] memory result = new bytes[](2);
+        bytes[] memory result = new bytes[](3);
         result[0] = abi.encodePacked(dataM[key].value);
         result[1] = abi.encodePacked(dataM[key].isStruct);
+        result[2] = abi.encodePacked(dataM[key].hash);
 
         return result;
     }

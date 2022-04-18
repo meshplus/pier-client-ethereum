@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -37,6 +38,7 @@ type Client struct {
 	eventC    chan *pb.IBTP
 	reqCh     chan *pb.GetDataRequest
 	blockCh   map[string]chan bool
+	dataHashM map[string][]byte
 }
 
 var (
@@ -124,6 +126,7 @@ func (c *Client) Initialize(configPath string, extra []byte) error {
 	c.eventC = make(chan *pb.IBTP, 1024)
 	c.reqCh = make(chan *pb.GetDataRequest, 1024)
 	c.blockCh = make(map[string]chan bool)
+	c.dataHashM = make(map[string][]byte)
 	c.ethClient = etherCli
 	c.session = session
 	c.abi = ab
@@ -171,6 +174,7 @@ func (c *Client) SubmitIBTP(from string, index uint64, serviceID string, ibtpTyp
 
 		// block until invoke SubmitOffChainData
 		key := fmt.Sprintf("%s-%s-%d", req.To, req.From, req.Index)
+		c.dataHashM[key] = content.Args[3]
 		c.blockCh[key] = make(chan bool)
 		c.blockCh[key] <- true
 	}
@@ -222,6 +226,7 @@ func (c *Client) SubmitReceipt(to string, index uint64, serviceID string, ibtpTy
 
 		// block until invoke SubmitOffChainData
 		key := fmt.Sprintf("%s-%s-%d", req.From, req.To, req.Index)
+		c.dataHashM[key] = result.Data[2]
 		c.blockCh[key] = make(chan bool)
 		c.blockCh[key] <- true
 	}
@@ -515,12 +520,19 @@ func (c *Client) GetOffChainDataReq() chan *pb.GetDataRequest {
 
 func (c *Client) SubmitOffChainData(response *pb.GetDataResponse) error {
 	key := fmt.Sprintf("%s-%s-%d", response.From, response.To, response.Index)
-	// todo(pwz): data integrity check
+	// data integrity check
+	sum := md5.Sum(response.Data)
+	hash := fmt.Sprintf("%x", sum)
+	if hash != string(c.dataHashM[key]) {
+		return fmt.Errorf("data integrity check failed")
+	}
+	delete(c.dataHashM, key)
+
+	logger.Info("Check data integrity successfully!")
 
 	// save offChain data
-	if err := ioutil.WriteFile(filepath.Join(c.config.Ether.OffChainPath, key), response.Data, 644); err != nil {
-		logger.Error("save offChain data", "error", err)
-		return err
+	if err := ioutil.WriteFile(filepath.Join(c.config.Ether.OffChainPath, key), response.Data, 0644); err != nil {
+		return fmt.Errorf("save offChain data: %w", err)
 	}
 
 	<-c.blockCh[key]

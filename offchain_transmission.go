@@ -11,7 +11,7 @@ const (
 )
 
 func CheckInterchainOffChain(content *pb.Content) bool {
-	if strings.EqualFold(content.Func, PUSH_FUNC) && len(content.Args) == 3 && strings.EqualFold(string(content.Args[2]), "1") {
+	if strings.EqualFold(content.Func, PUSH_FUNC) && len(content.Args) == 4 && strings.EqualFold(string(content.Args[2]), "1") {
 		return true
 	}
 	return false
@@ -28,7 +28,7 @@ func CheckReceiptOffChain(ibtp *pb.IBTP, result *pb.Result) (bool, error) {
 		return false, err
 	}
 
-	if strings.EqualFold(content.Func, GET_FUNC) && len(result.Data) == 2 && strings.EqualFold(string(result.Data[1]), "1") {
+	if strings.EqualFold(content.Func, GET_FUNC) && len(result.Data) == 3 && strings.EqualFold(string(result.Data[1]), "1") {
 		return true, nil
 	}
 
