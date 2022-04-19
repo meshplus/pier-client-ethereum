@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
 	"fmt"
 	"io/ioutil"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -34,6 +36,9 @@ type Client struct {
 	ethClient *ethclient.Client
 	session   *BrokerSession
 	eventC    chan *pb.IBTP
+	reqCh     chan *pb.GetDataRequest
+	blockCh   map[string]chan bool
+	dataHashM map[string][]byte
 }
 
 var (
@@ -110,6 +115,8 @@ func (c *Client) Initialize(configPath string, extra []byte) error {
 		TransactOpts: *auth,
 	}
 
+	//session.TransactOpts.GasLimit = 1500000
+
 	ab, err := abi.JSON(bytes.NewReader([]byte(BrokerABI)))
 	if err != nil {
 		return fmt.Errorf("abi unmarshal: %s", err.Error())
@@ -117,6 +124,9 @@ func (c *Client) Initialize(configPath string, extra []byte) error {
 
 	c.config = cfg
 	c.eventC = make(chan *pb.IBTP, 1024)
+	c.reqCh = make(chan *pb.GetDataRequest, 1024)
+	c.blockCh = make(map[string]chan bool)
+	c.dataHashM = make(map[string][]byte)
 	c.ethClient = etherCli
 	c.session = session
 	c.abi = ab
@@ -150,6 +160,25 @@ func (c *Client) Type() string {
 // the function inside the ibtp. If any execution results returned, pass
 // them to other modules.
 func (c *Client) SubmitIBTP(from string, index uint64, serviceID string, ibtpType pb.IBTP_Type, content *pb.Content, proof *pb.BxhProof, isEncrypted bool) (*pb.SubmitIBTPResponse, error) {
+	needOffChain := CheckInterchainOffChain(content)
+	if needOffChain {
+		bxhID, chainID, err := c.GetChainID()
+		if err != nil {
+			logger.Warn("call GetChainID failed", "error", err.Error())
+			return nil, err
+		}
+		req := constructReq(index, fmt.Sprintf("%s:%s:%s", bxhID, chainID, serviceID), from, content.Args[1])
+		req.IsSrc = true
+
+		c.reqCh <- req
+
+		// block until invoke SubmitOffChainData
+		key := fmt.Sprintf("%s-%s-%d", req.To, req.From, req.Index)
+		c.dataHashM[key] = content.Args[3]
+		c.blockCh[key] = make(chan bool)
+		c.blockCh[key] <- true
+	}
+
 	ret := &pb.SubmitIBTPResponse{Status: true}
 	//if 0 != strings.Compare(common.HexToAddress(serviceID).Hex(), serviceID) {
 	//	logger.Warn("destAddr checkSum failed",
@@ -176,6 +205,32 @@ func (c *Client) SubmitIBTP(from string, index uint64, serviceID string, ibtpTyp
 }
 
 func (c *Client) SubmitReceipt(to string, index uint64, serviceID string, ibtpType pb.IBTP_Type, result *pb.Result, proof *pb.BxhProof) (*pb.SubmitIBTPResponse, error) {
+	bxhID, chainID, err := c.GetChainID()
+	if err != nil {
+		logger.Warn("call GetChainID failed", "error", err.Error())
+	}
+	from := fmt.Sprintf("%s:%s:%s", bxhID, chainID, serviceID)
+	ibtp, err := c.GetOutMessage(fmt.Sprintf("%s-%s", from, to), index)
+	if err != nil {
+		logger.Warn("call GetOutMessage failed", "error", err.Error())
+	}
+	needOffChain, err := CheckReceiptOffChain(ibtp, result)
+	if err != nil {
+		logger.Warn("check offChain", "error", err.Error())
+	}
+
+	if needOffChain {
+		req := constructReq(index, from, to, result.Data[0])
+		req.IsSrc = false
+		c.reqCh <- req
+
+		// block until invoke SubmitOffChainData
+		key := fmt.Sprintf("%s-%s-%d", req.From, req.To, req.Index)
+		c.dataHashM[key] = result.Data[2]
+		c.blockCh[key] = make(chan bool)
+		c.blockCh[key] <- true
+	}
+
 	ret := &pb.SubmitIBTPResponse{Status: true}
 	receipt, err := c.invokeReceipt(serviceID, to, index, uint64(ibtpType), result.Data, uint64(proof.TxStatus), proof.MultiSign)
 	if err != nil {
@@ -407,13 +462,13 @@ func (c *Client) GetDstRollbackMeta() (map[string]uint64, error) {
 	return c.getMeta(c.session.GetDstRollbackMeta)
 }
 
-func (c *Client) GetTransactionMeta(IBTPid string) (uint64, uint64, error) {
-	timestamp, err := c.session.GetStartTimeStamp(IBTPid)
+func (c *Client) GetDirectTransactionMeta(IBTPid string) (uint64, uint64, uint64, error) {
+	timestamp, txStatus, err := c.session.GetDirectTransactionMeta(IBTPid)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 
-	return timestamp.Uint64(), c.config.Ether.TimeoutHeight, nil
+	return timestamp.Uint64(), c.config.Ether.TimeoutPeriod, txStatus, nil
 }
 
 func (c *Client) GetChainID() (string, string, error) {
@@ -431,4 +486,55 @@ func (c *Client) GetAppchainInfo(chainID string) (string, []byte, string, error)
 	}
 
 	return broker, trustRoot, ruleAddr.String(), nil
+}
+
+func (c *Client) GetOffChainData(request *pb.GetDataRequest) (*pb.GetDataResponse, error) {
+	// download file with url
+	resp, err := http.Get(string(request.Req))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	data, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	response := constructResp(request)
+
+	if len(data) > c.config.Ether.OffChainLimit*1024 {
+		response.Type = pb.GetDataResponse_DATA_OUT_OF_SIZE
+		response.Msg = fmt.Sprintf("the file is out of max size %d kb", c.config.Ether.OffChainLimit)
+	} else {
+		response.Type = pb.GetDataResponse_DATA_GET_SUCCESS
+		response.Data = data
+	}
+
+	return response, nil
+}
+
+func (c *Client) GetOffChainDataReq() chan *pb.GetDataRequest {
+	return c.reqCh
+}
+
+func (c *Client) SubmitOffChainData(response *pb.GetDataResponse) error {
+	key := fmt.Sprintf("%s-%s-%d", response.From, response.To, response.Index)
+	// data integrity check
+	sum := md5.Sum(response.Data)
+	hash := fmt.Sprintf("%x", sum)
+	if hash != string(c.dataHashM[key]) {
+		return fmt.Errorf("data integrity check failed")
+	}
+	delete(c.dataHashM, key)
+
+	logger.Info("Check data integrity successfully!")
+
+	// save offChain data
+	if err := ioutil.WriteFile(filepath.Join(c.config.Ether.OffChainPath, key), response.Data, 0644); err != nil {
+		return fmt.Errorf("save offChain data: %w", err)
+	}
+
+	<-c.blockCh[key]
+	return nil
 }

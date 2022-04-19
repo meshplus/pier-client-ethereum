@@ -6,3 +6,5 @@ key_path = "account.key"
 password = "password"
 min_confirm = 15
 timeout_height = 100
+timeout_period = 60
+offchain_limit = 50

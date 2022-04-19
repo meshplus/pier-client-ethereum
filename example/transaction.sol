@@ -2,13 +2,6 @@ pragma solidity >= 0.5.7;
 pragma experimental ABIEncoderV2;
 
 contract Transaction {
-    // begin-1, begin_rollback-2, success-3, fail-4, rollback-5
-    mapping(string => uint64) transactionStatus;
-
-    string[] transactionId;
-
-    address brokerAddr;
-
     struct Appchain {
         string id;
         string broker;
@@ -23,6 +16,12 @@ contract Transaction {
     string[] remoteServices;
     string[] appchainIDs;
 
+    // begin-1, begin_rollback-2, success-3, fail-4, rollback-5
+    mapping(string => uint64) transactionStatus;
+    mapping(string => uint) startTimestamp;
+    string[] transactionId;
+    address brokerAddr;
+
     //AccessControl
     modifier onlyBroker{
         require(msg.sender == brokerAddr, "Invoker are not the Broker");
@@ -31,6 +30,22 @@ contract Transaction {
 
     constructor(address _brokerAddr) public {
         brokerAddr = _brokerAddr;
+        Broker(brokerAddr).registerDirectTransaction();
+    }
+
+    function initialize() public onlyBroker {
+        for (uint x = 0; x < transactionId.length; ++x) {
+            transactionStatus[transactionId[x]] = 0;
+        }
+        for (uint y = 0; y < remoteServices.length; y++) {
+            delete remoteWhiteList[remoteServices[y]];
+        }
+        for (uint z = 0; z < appchainIDs.length; z++) {
+            delete appchains[appchainIDs[z]];
+        }
+        delete transactionId;
+        delete remoteServices;
+        delete appchainIDs;
     }
 
     // register remote appchain ID in direct mode, invoked by appchain admin
@@ -73,29 +88,15 @@ contract Transaction {
         return remoteServices;
     }
 
-    function genRemoteFullServiceID(string memory chainID, string memory serviceID) public view returns (string memory) {
+    function genRemoteFullServiceID(string memory chainID, string memory serviceID) private pure returns (string memory) {
         return string(abi.encodePacked(":", chainID, ":", serviceID));
-    }
-
-    function initialize() public onlyBroker {
-        for (uint i = 0; i < transactionId.length; ++i) {
-            transactionStatus[transactionId[i]] = 0;
-        }
-        for (uint x = 0; x < remoteServices.length; x++) {
-            delete remoteWhiteList[remoteServices[x]];
-        }
-        for (uint z = 0; z < appchainIDs.length; z++) {
-            delete appchains[appchainIDs[z]];
-        }
-        delete transactionId;
-        delete remoteServices;
-        delete appchainIDs;
     }
 
     function startTransaction(string memory from, string memory to, uint64 index) public onlyBroker {
         string memory IBTPid = genIBTPid(from, to, index);
         require(transactionStatus[IBTPid] == 0, "Transaction is recorded.");
         transactionStatus[IBTPid] = 1;
+        startTimestamp[IBTPid] = block.timestamp;
         // record IBTPid
         transactionId.push(IBTPid);
     }
@@ -131,7 +132,11 @@ contract Transaction {
         return transactionStatus[IBTPid];
     }
 
-    function genIBTPid(string memory from, string memory to, uint64 index) public pure returns (string memory) {
+    function getStartTimestamp(string memory IBTPid) public view returns (uint) {
+        return startTimestamp[IBTPid];
+    }
+
+    function genIBTPid(string memory from, string memory to, uint64 index) private pure returns (string memory) {
         string memory id = uint2str(uint(index));
         return string(abi.encodePacked(from, "-", to, "-", id));
     }
@@ -157,4 +162,8 @@ contract Transaction {
         }
         return string(bstr);
     }
+}
+
+abstract contract Broker {
+    function registerDirectTransaction() public virtual;
 }
