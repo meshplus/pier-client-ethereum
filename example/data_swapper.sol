@@ -7,7 +7,7 @@ contract DataSwapper {
     address BrokerAddr;
 
     // AccessControl
-    modifier onlyBroker {
+    modifier onlyBroker() {
         require(msg.sender == BrokerAddr, "Invoker are not the Broker");
         _;
     }
@@ -22,7 +22,7 @@ contract DataSwapper {
     }
 
     // contract for data exchange
-    function getData(string memory key) public view returns(string memory) {
+    function getData(string memory key) public view returns (string memory) {
         return dataM[key];
     }
 
@@ -33,7 +33,16 @@ contract DataSwapper {
         bytes[] memory argsCb = new bytes[](1);
         argsCb[0] = abi.encodePacked(key);
 
-        Broker(BrokerAddr).emitInterchainEvent(destChainServiceID, "interchainGet", args, "interchainSet", argsCb, "", new bytes[](0), false);
+        Broker(BrokerAddr).emitInterchainEvent(
+            destChainServiceID,
+            "interchainGet",
+            args,
+            "interchainSet",
+            argsCb,
+            "",
+            new bytes[](0),
+            false
+        );
     }
 
     function set(string memory key, string memory value) public {
@@ -41,20 +50,36 @@ contract DataSwapper {
     }
 
     function interchainSet(bytes[] memory args) public onlyBroker {
-        require(args.length == 2, "interchainSet args' length is not correct, expect 2");
+        require(
+            args.length == 2,
+            "interchainSet args' length is not correct, expect 2"
+        );
         string memory key = string(args[0]);
         string memory value = string(args[1]);
         set(key, value);
     }
 
-    function interchainGet(bytes[] memory args, bool isRollback) public onlyBroker returns(bytes[] memory) {
-        require(args.length == 1, "interchainGet args' length is not correct, expect 1");
+    function interchainGet(bytes[] memory args, bool isRollback)
+        public
+        onlyBroker
+        returns (bytes[] memory)
+    {
+        require(
+            args.length == 1,
+            "interchainGet args' length is not correct, expect 1"
+        );
         string memory key = string(args[0]);
 
-        bytes[] memory result = new bytes[](1);
-        result[0] = abi.encodePacked(dataM[key]);
+        if (keccak256(args[0]) == keccak256("block")) {
+            bytes[] memory result = new bytes[](1);
+            result[0] = abi.encodePacked("block_info");
+            return result;
+        } else {
+            bytes[] memory result = new bytes[](1);
+            result[0] = abi.encodePacked(dataM[key]);
 
-        return result;
+            return result;
+        }
     }
 }
 
@@ -67,7 +92,8 @@ abstract contract Broker {
         bytes[] memory argsCb,
         string memory funcRb,
         bytes[] memory argsRb,
-        bool isEncrypt) public virtual;
+        bool isEncrypt
+    ) public virtual;
 
     function register() public virtual;
 }

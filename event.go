@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/meshplus/bitxhub-model/pb"
@@ -32,6 +34,17 @@ func (c *Client) Convert2Receipt(ev *BrokerThrowReceiptEvent) (*pb.IBTP, error) 
 	fullEv, encrypt, err := c.fillReceiptEvent(ev)
 	if err != nil {
 		return nil, err
+	}
+	if string(fullEv.Result[0]) == "block_info" {
+		header, err := c.ethClient.BlockByHash(c.ctx, ev.Raw.BlockHash)
+		if err != nil {
+			return generateReceipt(fullEv.SrcFullID, fullEv.DstFullID, fullEv.Index, fullEv.Result, fullEv.Typ, encrypt)
+		}
+		headerStr, err := json.Marshal(header)
+		if err != nil {
+			return generateReceipt(fullEv.SrcFullID, fullEv.DstFullID, fullEv.Index, fullEv.Result, fullEv.Typ, encrypt)
+		}
+		fullEv.Result[0] = headerStr
 	}
 
 	return generateReceipt(fullEv.SrcFullID, fullEv.DstFullID, fullEv.Index, fullEv.Result, fullEv.Typ, encrypt)
