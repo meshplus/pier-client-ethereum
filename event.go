@@ -35,16 +35,21 @@ func (c *Client) Convert2Receipt(ev *BrokerThrowReceiptEvent) (*pb.IBTP, error) 
 	if err != nil {
 		return nil, err
 	}
+	if len(fullEv.Result) == 0 {
+		return generateReceipt(fullEv.SrcFullID, fullEv.DstFullID, fullEv.Index, fullEv.Result, fullEv.Typ, encrypt)
+	}
 	if string(fullEv.Result[0]) == "block_info" {
-		header, err := c.ethClient.BlockByHash(c.ctx, ev.Raw.BlockHash)
+		logger.Info("query block info")
+		block, err := c.ethClient.BlockByHash(c.ctx, ev.Raw.BlockHash)
 		if err != nil {
 			return generateReceipt(fullEv.SrcFullID, fullEv.DstFullID, fullEv.Index, fullEv.Result, fullEv.Typ, encrypt)
 		}
-		headerStr, err := json.Marshal(header)
+		headerStr, err := json.Marshal(block.Header())
 		if err != nil {
 			return generateReceipt(fullEv.SrcFullID, fullEv.DstFullID, fullEv.Index, fullEv.Result, fullEv.Typ, encrypt)
 		}
 		fullEv.Result[0] = headerStr
+		logger.Info(string(headerStr))
 	}
 
 	return generateReceipt(fullEv.SrcFullID, fullEv.DstFullID, fullEv.Index, fullEv.Result, fullEv.Typ, encrypt)
