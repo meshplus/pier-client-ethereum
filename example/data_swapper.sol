@@ -59,6 +59,22 @@ contract DataSwapper {
         set(key, value);
     }
 
+    function callSet(bytes[] memory args, bool isRollback)
+        public
+        onlyBroker
+        returns (bytes[] memory)
+    {
+        require(
+            args.length == 2,
+            "interchainSet args' length is not correct, expect 2"
+        );
+        string memory key = string(args[0]);
+        string memory value = string(args[1]);
+        set(key, value);
+
+        return new bytes[](0);
+    }
+
     function interchainGet(bytes[] memory args, bool isRollback)
         public
         onlyBroker
