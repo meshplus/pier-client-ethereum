@@ -205,6 +205,7 @@ func (c *Client) SubmitIBTP(from string, index uint64, serviceID string, ibtpTyp
 }
 
 func (c *Client) SubmitReceipt(to string, index uint64, serviceID string, ibtpType pb.IBTP_Type, result *pb.Result, proof *pb.BxhProof) (*pb.SubmitIBTPResponse, error) {
+	logger.Warn("11111")
 	bxhID, chainID, err := c.GetChainID()
 	if err != nil {
 		logger.Warn("call GetChainID failed", "error", err.Error())
@@ -218,7 +219,7 @@ func (c *Client) SubmitReceipt(to string, index uint64, serviceID string, ibtpTy
 	if err != nil {
 		logger.Warn("check offChain", "error", err.Error())
 	}
-
+	logger.Warn("22222")
 	if needOffChain {
 		req := constructReq(index, from, to, result.Data[0])
 		req.IsSrc = false
@@ -230,7 +231,7 @@ func (c *Client) SubmitReceipt(to string, index uint64, serviceID string, ibtpTy
 		c.blockCh[key] = make(chan bool)
 		c.blockCh[key] <- true
 	}
-
+	logger.Warn("33333")
 	ret := &pb.SubmitIBTPResponse{Status: true}
 	receipt, err := c.invokeReceipt(serviceID, to, index, uint64(ibtpType), result.Data, uint64(proof.TxStatus), proof.MultiSign)
 	if err != nil {
@@ -238,7 +239,7 @@ func (c *Client) SubmitReceipt(to string, index uint64, serviceID string, ibtpTy
 		ret.Message = err.Error()
 		return ret, nil
 	}
-
+	logger.Warn("444444")
 	if receipt.Status != types.ReceiptStatusSuccessful {
 		ret.Status = false
 		ret.Message = fmt.Sprintf("SubmitReceipt tx execution failed")
@@ -292,8 +293,25 @@ func (c *Client) invokeInterchain(srcFullID string, index uint64, destAddr strin
 }
 
 func (c *Client) invokeReceipt(srcAddr string, dstFullID string, index uint64, reqType uint64, result [][]byte, txStatus uint64, multiSign [][]byte) (*types.Receipt, error) {
+	if nil == multiSign {
+		panic("aaaaaaaaaaaaaaaaaaaaaaaa")
+	}
 	var tx *types.Transaction
 	var txErr error
+	logger.Debug("Call InvokeReceipt failed",
+		"srcAddr", srcAddr,
+		"dstFullID", dstFullID,
+		"index", fmt.Sprintf("%d", index),
+		"reqType", strconv.Itoa(int(reqType)),
+		"result", string(bytes.Join(result, []byte(","))),
+		"txStatus", strconv.Itoa(int(txStatus)),
+		"multiSign size", strconv.Itoa(len(multiSign)),
+	)
+	txErr = ioutil.WriteFile("/home/hyperchain/test", bytes.Join(result, []byte(",")), 777)
+	if txErr != nil {
+		panic(txErr)
+		return nil, txErr
+	}
 	if err := retry.Retry(func(attempt uint) error {
 		tx, txErr = c.session.InvokeReceipt(srcAddr, dstFullID, index, reqType, result, txStatus, multiSign)
 		if txErr != nil {
