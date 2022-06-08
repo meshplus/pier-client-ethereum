@@ -477,23 +477,26 @@ func (c *Client) GetAppchainInfo(chainID string) (string, []byte, string, error)
 }
 
 func (c *Client) GetOffChainData(request *pb.GetDataRequest) (*pb.GetDataResponse, error) {
+	fi, err := os.Stat(string(request.Req))
+	if err != nil {
+		return nil, fmt.Errorf("get file stat failed: %w", err)
+	}
+
+	resp := constructResp(request)
+	if fi.Size() > 2*1024*1024 {
+		resp.Type = pb.GetDataResponse_DATA_OUT_OF_SIZE
+		resp.Msg = fmt.Sprintf("the file is out of max size 2 Mb")
+	}
+
 	// download file with path
 	data, err := ioutil.ReadFile(string(request.Req))
 	if err != nil {
 		return nil, fmt.Errorf("download file failed: %w", err)
 	}
 
-	resp := constructResp(request)
-
-	if len(data) > 2*1024*1024 {
-		resp.Type = pb.GetDataResponse_DATA_OUT_OF_SIZE
-		resp.Msg = fmt.Sprintf("the file is out of max size 2 Mb")
-	} else {
-		resp.Type = pb.GetDataResponse_DATA_GET_SUCCESS
-		resp.Data = data
-		fileInfo, _ := os.Stat(string(request.Req))
-		resp.Msg = fileInfo.Name()
-	}
+	resp.Type = pb.GetDataResponse_DATA_GET_SUCCESS
+	resp.Data = data
+	resp.Msg = fi.Name()
 
 	return resp, nil
 }
