@@ -485,9 +485,9 @@ func (c *Client) GetOffChainData(request *pb.GetDataRequest) (*pb.GetDataRespons
 
 	resp := constructResp(request)
 
-	if len(data) > 100*1024*1024 {
+	if len(data) > 2*1024*1024 {
 		resp.Type = pb.GetDataResponse_DATA_OUT_OF_SIZE
-		resp.Msg = fmt.Sprintf("the file is out of max size 100 Mb")
+		resp.Msg = fmt.Sprintf("the file is out of max size 2 Mb")
 	} else {
 		resp.Type = pb.GetDataResponse_DATA_GET_SUCCESS
 		resp.Data = data
