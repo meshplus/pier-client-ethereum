@@ -38,6 +38,23 @@ contract Transfer {
         Broker(BrokerAddr).emitInterchainEvent(destChainServiceID, "interchainCharge", args, "", new bytes[](0), "interchainRollback", argsRb, false);
     }
 
+    // contract for asset
+    function privateTransfer(string memory destChainServiceID, string memory sender, string memory receiver, uint64 amount) public {
+        require(accountM[sender] >= amount);
+        accountM[sender] -= amount;
+
+        bytes[] memory args = new bytes[](3);
+        args[0] = abi.encodePacked(sender);
+        args[1] =abi.encodePacked(receiver);
+        args[2] = abi.encodePacked(amount);
+
+        bytes[] memory argsRb = new bytes[](2);
+        argsRb[0] = abi.encodePacked(sender);
+        argsRb[1] = abi.encodePacked(amount);
+
+        Broker(BrokerAddr).emitInterchainEvent(destChainServiceID, "interchainCharge", args, "", new bytes[](0), "interchainRollback", argsRb, true);
+    }
+
     function interchainRollback(bytes[] memory args) public onlyBroker {
         require(args.length == 2, "interchainRollback args' length is not correct, expect 2");
         string memory sender = string(args[0]);

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/meshplus/bitxhub-model/pb"
@@ -40,6 +41,7 @@ func (c *Client) Convert2Receipt(ev *BrokerThrowReceiptEvent) (*pb.IBTP, error) 
 func encodePayload(ev *BrokerThrowInterchainEvent, encrypt bool) ([]byte, error) {
 	var args [][]byte
 	for _, arg := range ev.Args {
+		logger.Info(string(arg))
 		args = append(args, []byte(arg))
 	}
 	content := &pb.Content{
@@ -47,6 +49,7 @@ func encodePayload(ev *BrokerThrowInterchainEvent, encrypt bool) ([]byte, error)
 		Args: args,
 	}
 	data, err := content.Marshal()
+	logger.Info(string(data))
 	if err != nil {
 		return nil, err
 	}
