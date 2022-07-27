@@ -297,7 +297,9 @@ contract Broker {
         if (keccak256(abi.encodePacked(callFunc)) != keccak256(abi.encodePacked(""))) {
             (bool ok, bytes memory data) = address(destAddr).call(abi.encodeWithSignature(string(abi.encodePacked(callFunc, "(bytes[],bool)")), args, isRollback));
             status = ok;
-            result = abi.decode(data, (bytes[]));
+            if (status) {
+                result = abi.decode(data, (bytes[]));
+            }
         }
 
         return (status, result);
