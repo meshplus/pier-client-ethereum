@@ -21,7 +21,7 @@ RUN go env -w GOPROXY=https://goproxy.cn,direct \
     && pier init relay \
     && mkdir /root/.pier/ethereum /root/.pier/plugins \
     && cp /go/src/github.com/meshplus/pier-client-ethereum/build/eth-client /root/.pier/plugins/appchain_plugin \
-    && cp /go/src/github.com/meshplus/pier-client-ethereum/config/* /root/.pier/ethereum
+    && cp -r /go/src/github.com/meshplus/pier-client-ethereum/config/* /root/.pier/ethereum
 
 FROM frolvlad/alpine-glibc:glibc-2.32
 
