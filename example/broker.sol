@@ -870,6 +870,10 @@ contract Broker {
         // 不允许同broker服务自跨链
         require(!found, "dest service is belong to current broker!");
     }
+
+    function setValidators(address[] memory newValidators) public onlyAdmin {
+        validators = newValidators;
+    }
 }
 
 abstract contract Transaction {
