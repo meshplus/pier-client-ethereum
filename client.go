@@ -26,15 +26,17 @@ import (
 )
 
 //go:generate abigen --sol ./example/broker.sol --pkg main --out broker.go
+//go:generate abigen --sol ./example/broker_direct.sol --pkg main --out broker_direct.go
 type Client struct {
-	abi       abi.ABI
-	config    *Config
-	ctx       context.Context
-	cancel    context.CancelFunc
-	ethClient *ethclient.Client
-	session   *BrokerSession
-	eventC    chan *pb.IBTP
-	reqCh     chan *pb.GetDataRequest
+	abi           abi.ABI
+	config        *Config
+	ctx           context.Context
+	cancel        context.CancelFunc
+	ethClient     *ethclient.Client
+	session       *BrokerSession
+	sessionDirect *BrokerDirectSession
+	eventC        chan *pb.IBTP
+	reqCh         chan *pb.GetDataRequest
 }
 
 var (
@@ -53,7 +55,7 @@ func (c *Client) GetUpdateMeta() chan *pb.UpdateMeta {
 	panic("implement me")
 }
 
-func (c *Client) Initialize(configPath string, extra []byte) error {
+func (c *Client) Initialize(configPath string, extra []byte, mode string) error {
 	cfg, err := UnmarshalConfig(configPath)
 	if err != nil {
 		return fmt.Errorf("unmarshal config for plugin :%w", err)
@@ -99,19 +101,33 @@ func (c *Client) Initialize(configPath string, extra []byte) error {
 		auth.Context = context.TODO()
 	}
 	auth.Value = nil
-	broker, err := NewBroker(common.HexToAddress(cfg.Ether.ContractAddress), etherCli)
-	if err != nil {
-		return fmt.Errorf("failed to instantiate a Broker contract: %w", err)
+	if mode == relayMode {
+		broker, err := NewBroker(common.HexToAddress(cfg.Ether.ContractAddress), etherCli)
+		if err != nil {
+			return fmt.Errorf("failed to instantiate a Broker contract: %w", err)
+		}
+		session := &BrokerSession{
+			Contract: broker,
+			CallOpts: bind.CallOpts{
+				Pending: false,
+			},
+			TransactOpts: *auth,
+		}
+		c.session = session
+	} else {
+		broker, err := NewBrokerDirect(common.HexToAddress(cfg.Ether.ContractAddress), etherCli)
+		if err != nil {
+			return fmt.Errorf("failed to instantiate a Broker contract: %w", err)
+		}
+		sessionDirect := &BrokerDirectSession{
+			Contract: broker,
+			CallOpts: bind.CallOpts{
+				Pending: false,
+			},
+			TransactOpts: *auth,
+		}
+		c.sessionDirect = sessionDirect
 	}
-	session := &BrokerSession{
-		Contract: broker,
-		CallOpts: bind.CallOpts{
-			Pending: false,
-		},
-		TransactOpts: *auth,
-	}
-
-	//session.TransactOpts.GasLimit = 1500000
 
 	ab, err := abi.JSON(bytes.NewReader([]byte(BrokerABI)))
 	if err != nil {
@@ -122,7 +138,6 @@ func (c *Client) Initialize(configPath string, extra []byte) error {
 	c.eventC = make(chan *pb.IBTP, 1024)
 	c.reqCh = make(chan *pb.GetDataRequest, 1024)
 	c.ethClient = etherCli
-	c.session = session
 	c.abi = ab
 	c.ctx, c.cancel = context.WithCancel(context.Background())
 
@@ -235,11 +250,67 @@ func (c *Client) SubmitReceipt(to string, index uint64, serviceID string, ibtpTy
 	return ret, nil
 }
 
+func (c *Client) SubmitIBTPBatch(from []string, index []uint64, serviceID []string, ibtpType []pb.IBTP_Type, content []*pb.Content, proof []*pb.BxhProof, isEncrypted []bool) (*pb.SubmitIBTPResponse, error) {
+	ret := &pb.SubmitIBTPResponse{Status: true}
+	var (
+		callFunc []string
+		args     [][][]byte
+		typ      []uint64
+		txStatus []uint64
+		sign     [][][]byte
+		tx       *types.Transaction
+		txErr    error
+	)
+	for idx, ct := range content {
+		callFunc = append(callFunc, ct.Func)
+		args = append(args, ct.Args)
+		typ = append(typ, uint64(ibtpType[idx]))
+		txStatus = append(txStatus, uint64(proof[idx].TxStatus))
+		sign = append(sign, proof[idx].MultiSign)
+	}
+
+	if err := retry.Retry(func(attempt uint) error {
+		tx, txErr = c.session.InvokeInterchains(from, serviceID, index, typ, callFunc, args, txStatus, sign, isEncrypted)
+		if txErr != nil {
+			if strings.Contains(txErr.Error(), "execution reverted") {
+				return nil
+			}
+		}
+
+		return txErr
+	}, strategy.Wait(2*time.Second)); err != nil {
+		logger.Error("Can't invoke contract", "error", err)
+	}
+	if txErr != nil {
+		ret.Status = false
+		ret.Message = txErr.Error()
+		return ret, nil
+	}
+
+	receipt := c.waitForConfirmed(tx.Hash())
+
+	if receipt.Status != types.ReceiptStatusSuccessful {
+		ret.Status = false
+		ret.Message = fmt.Sprintf("SubmitIBTP tx execution failed")
+		return ret, nil
+	}
+
+	return ret, nil
+}
+
+func (c *Client) SubmitReceiptBatch(to []string, index []uint64, serviceID []string, ibtpType []pb.IBTP_Type, result []*pb.Result, proof []*pb.BxhProof) (*pb.SubmitIBTPResponse, error) {
+	panic("implement me")
+}
+
 func (c *Client) invokeInterchain(srcFullID string, index uint64, destAddr string, reqType uint64, callFunc string, args [][]byte, txStatus uint64, multiSign [][]byte, encrypt bool) (*types.Receipt, error) {
 	var tx *types.Transaction
 	var txErr error
 	if err := retry.Retry(func(attempt uint) error {
-		tx, txErr = c.session.InvokeInterchain(srcFullID, destAddr, index, reqType, callFunc, args, txStatus, multiSign, encrypt)
+		if c.session == nil {
+			tx, txErr = c.sessionDirect.InvokeInterchain(srcFullID, destAddr, index, reqType, callFunc, args, txStatus, multiSign, encrypt)
+		} else {
+			tx, txErr = c.session.InvokeInterchain(srcFullID, destAddr, index, reqType, callFunc, args, txStatus, multiSign, encrypt)
+		}
 		if txErr != nil {
 			logger.Warn("Call InvokeInterchain failed",
 				"srcFullID", srcFullID,
@@ -283,7 +354,11 @@ func (c *Client) invokeReceipt(srcAddr string, dstFullID string, index uint64, r
 	var tx *types.Transaction
 	var txErr error
 	if err := retry.Retry(func(attempt uint) error {
-		tx, txErr = c.session.InvokeReceipt(srcAddr, dstFullID, index, reqType, result, txStatus, multiSign)
+		if c.session == nil {
+			tx, txErr = c.sessionDirect.InvokeReceipt(srcAddr, dstFullID, index, reqType, result, txStatus, multiSign)
+		} else {
+			tx, txErr = c.session.InvokeReceipt(srcAddr, dstFullID, index, reqType, result, txStatus, multiSign)
+		}
 		if txErr != nil {
 			logger.Warn("Call InvokeReceipt failed",
 				"srcAddr", srcAddr,
@@ -347,7 +422,11 @@ func (c *Client) GetReceiptMessage(servicePair string, idx uint64) (*pb.IBTP, er
 
 	if err := retry.Retry(func(attempt uint) error {
 		var err error
-		data, typ, encrypt, err = c.session.GetReceiptMessage(servicePair, idx)
+		if c.session == nil {
+			data, typ, encrypt, err = c.sessionDirect.GetReceiptMessage(servicePair, idx)
+		} else {
+			data, typ, encrypt, err = c.session.GetReceiptMessage(servicePair, idx)
+		}
 		if err != nil {
 			logger.Error("get receipt message", "servicePair", servicePair, "err", err.Error())
 		}
@@ -368,18 +447,27 @@ func (c *Client) GetReceiptMessage(servicePair string, idx uint64) (*pb.IBTP, er
 // GetInMeta queries contract about how many interchain txs have been
 // executed on this appchain for different source chains.
 func (c *Client) GetInMeta() (map[string]uint64, error) {
+	if c.session == nil {
+		return c.getMeta(c.sessionDirect.GetInnerMeta)
+	}
 	return c.getMeta(c.session.GetInnerMeta)
 }
 
 // GetOutMeta queries contract about how many interchain txs have been
 // sent out on this appchain to different destination chains.
 func (c *Client) GetOutMeta() (map[string]uint64, error) {
+	if c.session == nil {
+		return c.getMeta(c.sessionDirect.GetOuterMeta)
+	}
 	return c.getMeta(c.session.GetOuterMeta)
 }
 
 // GetCallbackMeta queries contract about how many callback functions have been
 // executed on this appchain from different destination chains.
 func (c *Client) GetCallbackMeta() (map[string]uint64, error) {
+	if c.session == nil {
+		return c.getMeta(c.sessionDirect.GetCallbackMeta)
+	}
 	return c.getMeta(c.session.GetCallbackMeta)
 }
 
@@ -447,11 +535,14 @@ func (c *Client) waitForConfirmed(hash common.Hash) *types.Receipt {
 }
 
 func (c *Client) GetDstRollbackMeta() (map[string]uint64, error) {
+	if c.session == nil {
+		return c.getMeta(c.sessionDirect.GetDstRollbackMeta)
+	}
 	return c.getMeta(c.session.GetDstRollbackMeta)
 }
 
 func (c *Client) GetDirectTransactionMeta(IBTPid string) (uint64, uint64, uint64, error) {
-	timestamp, txStatus, err := c.session.GetDirectTransactionMeta(IBTPid)
+	timestamp, txStatus, err := c.sessionDirect.GetDirectTransactionMeta(IBTPid)
 	if err != nil {
 		return 0, 0, 0, err
 	}
@@ -460,15 +551,21 @@ func (c *Client) GetDirectTransactionMeta(IBTPid string) (uint64, uint64, uint64
 }
 
 func (c *Client) GetChainID() (string, string, error) {
+	if c.session == nil {
+		return c.sessionDirect.GetChainID()
+	}
 	return c.session.GetChainID()
 }
 
 func (c *Client) GetServices() ([]string, error) {
+	if c.session == nil {
+		return c.sessionDirect.GetLocalServiceList()
+	}
 	return c.session.GetLocalServiceList()
 }
 
 func (c *Client) GetAppchainInfo(chainID string) (string, []byte, string, error) {
-	broker, trustRoot, ruleAddr, err := c.session.GetAppchainInfo(chainID)
+	broker, trustRoot, ruleAddr, err := c.sessionDirect.GetAppchainInfo(chainID)
 	if err != nil {
 		return "", nil, "", err
 	}
@@ -485,7 +582,7 @@ func (c *Client) GetOffChainData(request *pb.GetDataRequest) (*pb.GetDataRespons
 	resp := constructResp(request)
 	if fi.Size() > 2*1024*1024 {
 		resp.Type = pb.GetDataResponse_DATA_OUT_OF_SIZE
-		resp.Msg = fmt.Sprintf("the file is out of max size 2 Mb")
+		resp.Msg = fmt.Sprintf("the file is out of max size 2 MB")
 	}
 
 	// download file with path
