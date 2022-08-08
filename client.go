@@ -145,6 +145,9 @@ func (c *Client) Initialize(configPath string, extra []byte, mode string) error 
 }
 
 func (c *Client) Start() error {
+	if c.session == nil {
+		return c.StartDirectConsumer()
+	}
 	return c.StartConsumer()
 }
 

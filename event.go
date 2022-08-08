@@ -61,17 +61,7 @@ func encodePayload(ev *BrokerThrowInterchainEvent, encrypt bool) ([]byte, error)
 
 func (c *Client) fillInterchainEvent(ev *BrokerThrowInterchainEvent) (*BrokerThrowInterchainEvent, bool, error) {
 	if ev.Func == "" {
-		var (
-			fun     string
-			args    [][]byte
-			encrypt bool
-			err     error
-		)
-		if c.session == nil {
-			fun, args, encrypt, err = c.sessionDirect.GetOutMessage(pb.GenServicePair(ev.SrcFullID, ev.DstFullID), ev.Index)
-		} else {
-			fun, args, encrypt, err = c.session.GetOutMessage(pb.GenServicePair(ev.SrcFullID, ev.DstFullID), ev.Index)
-		}
+		fun, args, encrypt, err := c.session.GetOutMessage(pb.GenServicePair(ev.SrcFullID, ev.DstFullID), ev.Index)
 		if err != nil {
 			return nil, false, err
 		}
@@ -98,17 +88,7 @@ func (c *Client) fillInterchainEvent(ev *BrokerThrowInterchainEvent) (*BrokerThr
 
 func (c *Client) fillReceiptEvent(ev *BrokerThrowReceiptEvent) (*BrokerThrowReceiptEvent, bool, error) {
 	if ev.Result == nil {
-		var (
-			result  [][]byte
-			typ     uint64
-			encrypt bool
-			err     error
-		)
-		if c.session == nil {
-			result, typ, encrypt, err = c.sessionDirect.GetReceiptMessage(pb.GenServicePair(ev.SrcFullID, ev.DstFullID), ev.Index)
-		} else {
-			result, typ, encrypt, err = c.session.GetReceiptMessage(pb.GenServicePair(ev.SrcFullID, ev.DstFullID), ev.Index)
-		}
+		result, typ, encrypt, err := c.session.GetReceiptMessage(pb.GenServicePair(ev.SrcFullID, ev.DstFullID), ev.Index)
 		if err != nil {
 			return nil, false, err
 		}
