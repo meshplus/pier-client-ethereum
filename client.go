@@ -406,13 +406,23 @@ func (c *Client) GetOutMessage(servicePair string, idx uint64) (*pb.IBTP, error)
 		return nil, err
 	}
 
-	ev := &BrokerThrowInterchainEvent{
-		Index:     idx,
-		DstFullID: dstService,
-		SrcFullID: srcService,
-	}
+	if c.session == nil {
+		ev := &BrokerDirectThrowInterchainEvent{
+			Index:     idx,
+			DstFullID: dstService,
+			SrcFullID: srcService,
+		}
 
-	return c.Convert2IBTP(ev, int64(c.config.Ether.TimeoutHeight))
+		return c.Convert2DirectIBTP(ev, int64(c.config.Ether.TimeoutHeight))
+	} else {
+		ev := &BrokerThrowInterchainEvent{
+			Index:     idx,
+			DstFullID: dstService,
+			SrcFullID: srcService,
+		}
+
+		return c.Convert2IBTP(ev, int64(c.config.Ether.TimeoutHeight))
+	}
 }
 
 // GetInMessage gets the execution results from contract by from-index key

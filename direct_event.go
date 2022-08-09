@@ -34,7 +34,7 @@ func (c *Client) Convert2DirectReceipt(ev *BrokerDirectThrowReceiptEvent) (*pb.I
 		return nil, err
 	}
 
-	return generateDirectReceipt(fullEv.SrcFullID, fullEv.DstFullID, fullEv.Index, fullEv.Result, fullEv.Typ, encrypt)
+	return generateReceipt(fullEv.SrcFullID, fullEv.DstFullID, fullEv.Index, fullEv.Result, fullEv.Typ, encrypt)
 }
 
 func encodeDirectPayload(ev *BrokerDirectThrowInterchainEvent, encrypt bool) ([]byte, error) {
@@ -108,38 +108,4 @@ func (c *Client) fillDirectReceiptEvent(ev *BrokerDirectThrowReceiptEvent) (*Bro
 	}
 
 	return ev, false, nil
-}
-
-func generateDirectReceipt(from, to string, idx uint64, data [][]byte, typ uint64, encrypt bool) (*pb.IBTP, error) {
-	result := &pb.Result{Data: data}
-	content, err := result.Marshal()
-	if err != nil {
-		return nil, err
-	}
-
-	var packed []byte
-	for _, ele := range data {
-		packed = append(packed, ele...)
-	}
-
-	payload := pb.Payload{
-		Encrypted: encrypt,
-		Content:   content,
-		Hash:      crypto.Keccak256(packed),
-	}
-
-	pd, err := payload.Marshal()
-	if err != nil {
-		return nil, err
-	}
-
-	return &pb.IBTP{
-		From:          from,
-		To:            to,
-		Index:         idx,
-		Type:          pb.IBTP_Type(typ),
-		TimeoutHeight: 0,
-		Proof:         []byte("1"),
-		Payload:       pd,
-	}, nil
 }

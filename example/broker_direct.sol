@@ -6,6 +6,7 @@ contract BrokerDirect {
         uint64 approve;
         uint64 reject;
         address[] votedAdmins;
+        bool ordered;
         bool exist;
     }
 
@@ -32,6 +33,7 @@ contract BrokerDirect {
     address[] localServices;
     mapping(address => Proposal) localServiceProposal;
     address[] proposalList;
+    mapping(address => bool) serviceOrdered;
 
     // transaction management contract in direct mode
     address directTransactionAddr;
@@ -124,13 +126,13 @@ contract BrokerDirect {
     }
 
     // register local service to Broker
-    function register() public {
+    function register(bool ordered) public {
         require(tx.origin != msg.sender, "register not by contract");
         if (localWhiteList[msg.sender] || localServiceProposal[msg.sender].exist) {
             return;
         }
 
-        localServiceProposal[msg.sender] = Proposal(0, 0, new address[](admins.length), true);
+        localServiceProposal[msg.sender] = Proposal(0, 0, new address[](admins.length), ordered, true);
     }
 
     function audit(address addr, int64 status) public onlyAdmin returns (bool) {
@@ -141,8 +143,10 @@ contract BrokerDirect {
         }
 
         if (result == 1) {
+            bool ordered = localServiceProposal[addr].ordered;
             delete localServiceProposal[addr];
             localWhiteList[addr] = true;
+            serviceOrdered[addr] = ordered;
             localServices.push(addr);
         } else {
             delete localServiceProposal[addr];
