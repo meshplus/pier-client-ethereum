@@ -4,7 +4,8 @@ name = "ether"
 contract_address = "0xD3880ea40670eD51C3e3C0ea089fDbDc9e3FBBb4"
 key_path = "account.key"
 password = "password"
-min_confirm = 15
+# 交易最小确认区块数，常用于区块链为非确定性共识算法，如POW
+min_confirm = 0
 timeout_height = 100
 timeout_period = 60
 offchain_addr = ""

@@ -6,10 +6,17 @@ contract Transfer {
     // change the address of Broker accordingly
     address BrokerAddr;
 
+    mapping(string => uint64) SenderID;
+
     // AccessControl
     modifier onlyBroker {
         require(msg.sender == BrokerAddr, "Invoker are not the Broker");
         _;
+    }
+
+    // register sender ID
+    function registerSender(string memory _senderID) public{
+        SenderID[_senderID] = 1;
     }
 
     constructor(address _brokerAddr, bool _ordered) {
@@ -46,6 +53,8 @@ contract Transfer {
     }
 
     function interchainCharge(bytes[] memory args, bool isRollback) public onlyBroker returns (bytes[] memory) {
+        string memory sender = string(args[0]);
+        require(SenderID[sender] == 1, "Unknown sender");
         require(args.length == 3, "interchainCharge args' length is not correct, expect 3");
         string memory receiver = string(args[1]);
         uint64 amount = bytesToUint64(args[2]);
