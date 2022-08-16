@@ -12,13 +12,13 @@ contract DataSwapper {
         _;
     }
 
-    constructor(address _brokerAddr) public {
+    constructor(address _brokerAddr, bool _ordered) {
         BrokerAddr = _brokerAddr;
-        Broker(BrokerAddr).register();
+        Broker(BrokerAddr).register(_ordered);
     }
 
-    function register() public {
-        Broker(BrokerAddr).register();
+    function register(bool _ordered) public {
+        Broker(BrokerAddr).register(_ordered);
     }
 
     // contract for data exchange
@@ -69,5 +69,5 @@ abstract contract Broker {
         bytes[] memory argsRb,
         bool isEncrypt) public virtual;
 
-    function register() public virtual;
+    function register(bool ordered) public virtual;
 }

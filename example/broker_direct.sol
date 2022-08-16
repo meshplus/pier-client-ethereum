@@ -1,7 +1,7 @@
 pragma solidity >=0.6.9 <=0.7.6;
 pragma experimental ABIEncoderV2;
 
-contract Broker {
+contract BrokerDirect {
     struct Proposal {
         uint64 approve;
         uint64 reject;
@@ -35,14 +35,13 @@ contract Broker {
     address[] proposalList;
     mapping(address => bool) serviceOrdered;
 
+    // transaction management contract in direct mode
+    address directTransactionAddr;
+
     string bitxhubID;
     string appchainID;
-    address[] public validators;
-    uint64 public valThreshold;
     address[] public admins;
     uint64 public adminThreshold;
-
-    address[] bxhSigners;
 
     event throwInterchainEvent(uint64 index, string dstFullID, string srcFullID, string func, bytes[] args, bytes32 hash);
     event throwReceiptEvent(uint64 index, string dstFullID, string srcFullID, uint64 typ, bool status, bytes[] result, bytes32 hash);
@@ -79,30 +78,21 @@ contract Broker {
 
     constructor(string memory _bitxhubID,
         string memory _appchainID,
-        address[] memory _validators,
-        uint64 _valThreshold,
         address[] memory _admins,
         uint64 _adminThreshold) {
         bitxhubID = _bitxhubID;
         appchainID = _appchainID;
-        validators = _validators;
-        valThreshold = _valThreshold;
         admins = _admins;
         adminThreshold = _adminThreshold;
     }
 
+    // update admin list and adminThreshold
     function setAdmins(address[] memory _admins, uint64 _adminThreshold) public onlyAdmin {
         admins = _admins;
         adminThreshold = _adminThreshold;
     }
 
-    function setValidators(address[] memory _validators, uint64 _valThreshold) public onlyAdmin {
-        validators = _validators;
-        valThreshold = _valThreshold;
-    }
-
-
-    function initialize() public {
+    function initialize() public onlyAdmin {
         for (uint i = 0; i < inServicePairs.length; i++) {
             inCounter[inServicePairs[i]] = 0;
         }
@@ -125,6 +115,14 @@ contract Broker {
         delete inServicePairs;
         delete callbackServicePairs;
         delete localServices;
+        Transaction(directTransactionAddr).initialize();
+    }
+
+    // register transaction management contract address in direct mode
+    // invoke by transaction management contract
+    function registerDirectTransaction() public {
+        require(tx.origin != msg.sender, "register not by contract");
+        directTransactionAddr = msg.sender;
     }
 
     // register local service to Broker
@@ -185,6 +183,22 @@ contract Broker {
         return 0;
     }
 
+    // register remote appchain ID in direct mode, invoked by appchain admin
+    function registerAppchain(string memory chainID, string memory broker, address ruleAddr, bytes memory trustRoot) public onlyAdmin {
+        Transaction(directTransactionAddr).registerAppchain(chainID, broker, ruleAddr, trustRoot);
+    }
+
+    // register service ID from counterparty appchain in direct mode, invoked by appchain admin
+    // serviceID: the service from counterparty appchain which will call service on current appchain
+    // whiteList：service list on current appchain which are allowed to be called by remote service
+    function registerRemoteService(string memory chainID, string memory serviceID, address[] memory whiteList) public onlyAdmin {
+        Transaction(directTransactionAddr).registerRemoteService(chainID, serviceID, whiteList);
+    }
+
+    function getAppchainInfo(string memory chainID) public view returns (string memory, bytes memory, address) {
+        return Transaction(directTransactionAddr).getAppchainInfo(chainID);
+    }
+
     // get the registered local service list
     function getLocalServiceList() public view returns (string[] memory) {
         string[] memory fullServiceIDList = new string[](localServices.length);
@@ -196,28 +210,18 @@ contract Broker {
     }
 
     // get the registered counterparty service list
-    function getLocalWhiteList(address addr) public view returns (bool) {
-        return localWhiteList[addr];
+    function getRemoteServiceList() public view returns (string[] memory) {
+        return Transaction(directTransactionAddr).getRemoteServiceList();
     }
 
-    function invokeInterchains(
-        string[] memory srcFullID,
-        string[] memory destAddr,
-        uint64[] memory index,
-        uint64[] memory typ,
-        string[] memory callFunc,
-        bytes[][] memory args,
-        uint64[] memory txStatus,
-        bytes[][] memory signatures,
-        bool[] memory isEncrypt) payable external {
-        for (uint8 i = 0; i <  srcFullID.length; ++i) {
-            if (serviceOrdered[stringToAddress(destAddr[i])] == true) {
-                string memory dstFullID = genFullServiceID(destAddr[i]);
-                invokeIndexUpdateWithError(srcFullID[i], dstFullID, index[i], txStatus[i], isEncrypt[i], "dst service is not ordered");
-                continue;
-            }
-            invokeInterchain(srcFullID[i], destAddr[i], index[i], typ[i], callFunc[i], args[i], txStatus[i], signatures[i], isEncrypt[i]);
-        }
+    // get the registered counterparty service list
+    function getRSWhiteList(string memory remoteAddr) public view returns (address[] memory) {
+        return Transaction(directTransactionAddr).getRSWhiteList(remoteAddr);
+    }
+
+    // get the registered counterparty service list
+    function getLocalWhiteList(address addr) public view returns (bool) {
+        return localWhiteList[addr];
     }
 
     // called on dest chain
@@ -231,26 +235,17 @@ contract Broker {
         bytes[] memory args,
         uint64 txStatus,
         bytes[] memory signatures,
-        bool isEncrypt) payable public {
+        bool isEncrypt) payable external {
+        // bool isRollback = false;
         string memory dstFullID = genFullServiceID(destAddr);
         string memory servicePair = genServicePair(srcFullID, dstFullID);
-        {
-            bool ok = checkInterchainMultiSigns(srcFullID, dstFullID, index, typ, callFunc, args, txStatus, signatures);
-            if (!ok) {
-                invokeIndexUpdateWithError(srcFullID, dstFullID, index, txStatus, isEncrypt, "invalid multi-signature");
-                return;
-            }
-
-            if (localWhiteList[stringToAddress(destAddr)] == false) {
-                invokeIndexUpdateWithError(srcFullID, dstFullID, index, txStatus, isEncrypt, "dest address is not in local white list");
-                return;
-            }
-        }
 
         bool status = true;
         bytes[] memory result;
         if (txStatus == 0) {
             // INTERCHAIN && BEGIN
+            checkService(srcFullID, stringToAddress(destAddr));
+
             if (inCounter[servicePair] < index) {
                 (status, result) = callService(stringToAddress(destAddr), callFunc, args, false);
             }
@@ -261,16 +256,14 @@ contract Broker {
                 typ = 2;
             }
         } else {
-            // INTERCHAIN && FAILURE || INTERCHAIN && ROLLBACK, only happened in relay mode
+            // INTERCHAIN && FAILURE || INTERCHAIN && ROLLBACK
             if (inCounter[servicePair] >= index) {
+                checkService(srcFullID, stringToAddress(destAddr));
                 (status, result) = callService(stringToAddress(destAddr), callFunc, args, true);
             }
             invokeIndexUpdate(srcFullID, dstFullID, index, 2);
-            if (txStatus == 1) {
-                typ = 2;
-            } else {
-                typ = 3;
-            }
+            // ROLLBACK -> ROLLBACK_END
+            typ = 4;
         }
 
         receiptMessages[servicePair][index] = Receipt(isEncrypt, typ, result);
@@ -280,30 +273,6 @@ contract Broker {
         } else {
             emit throwReceiptEvent(index, dstFullID, srcFullID, typ, status, result, computeHash(result));
         }
-    }
-
-    function callService(address destAddr, string memory callFunc, bytes[] memory args, bool isRollback) private returns (bool, bytes[] memory) {
-        bool status = true;
-        bytes[] memory result;
-
-        if (keccak256(abi.encodePacked(callFunc)) != keccak256(abi.encodePacked(""))) {
-            (bool ok, bytes memory data) = address(destAddr).call(abi.encodeWithSignature(string(abi.encodePacked(callFunc, "(bytes[],bool)")), args, isRollback));
-            status = ok;
-            if (status) {
-                result = abi.decode(data, (bytes[]));
-            }
-        }
-
-        return (status, result);
-    }
-
-    function computeHash(bytes[] memory args) internal pure returns (bytes32) {
-        bytes memory packed;
-        for (uint i = 0; i < args.length; i++) {
-            packed = abi.encodePacked(packed, args[i]);
-        }
-
-        return keccak256(packed);
     }
 
     // called on src chain
@@ -317,13 +286,25 @@ contract Broker {
         bytes[] memory signatures) payable external {
         string memory srcFullID = genFullServiceID(srcAddr);
         bool isRollback = false;
-        if (txStatus != 0 && txStatus != 3) {
+        // IBTP_RECEIPT_SUCCESS || IBTP_RECEIPT_FAILURE || IBTP_RECEIPT_ROLLBACK || IBTP_RECEIPT_ROLLBACK_END
+        require(typ == 1 || typ == 2 || typ == 3 || typ == 4, "IBTP type is not correct in direct mode");
+        if (typ == 1) {
+            Transaction(directTransactionAddr).endTransactionSuccess(srcFullID, dstFullID, index);
+        }
+        if (typ == 2) {
             isRollback = true;
+            Transaction(directTransactionAddr).endTransactionFail(srcFullID, dstFullID, index);
+        }
+        if (typ == 3) {
+            isRollback = true;
+            Transaction(directTransactionAddr).rollbackTransaction(srcFullID, dstFullID, index);
+        }
+        if (typ == 4) {
+            Transaction(directTransactionAddr).endTransactionRollback(srcFullID, dstFullID, index);
+            return;
         }
 
         invokeIndexUpdate(srcFullID, dstFullID, index, 1);
-
-        checkReceiptMultiSigns(srcFullID, dstFullID, index, typ, result, txStatus, signatures);
 
         string memory outServicePair = genServicePair(srcFullID, dstFullID);
         CallFunc memory invokeFunc = outMessages[outServicePair][index].callback;
@@ -355,51 +336,6 @@ contract Broker {
         emit throwReceiptStatus(true);
     }
 
-    function invokeIndexUpdate(string memory srcFullID, string memory dstFullID, uint64 index, uint64 reqType) private {
-        string memory servicePair = genServicePair(srcFullID, dstFullID);
-        if (reqType == 0) {
-            require(inCounter[servicePair] + 1 == index);
-            markInCounter(servicePair);
-        } else if (reqType == 1) {
-            // invoke src callback or rollback
-            require(callbackCounter[servicePair] + 1 == index);
-            markCallbackCounter(servicePair, index);
-        } else if (reqType == 2) {
-            // invoke dst rollback
-            require(dstRollbackCounter[servicePair] + 1 <= index);
-            markDstRollbackCounter(servicePair, index);
-            if (inCounter[servicePair] + 1 == index) {
-                markInCounter(servicePair);
-            }
-        }
-    }
-
-    function invokeIndexUpdateWithError(string memory srcFullID, string memory dstFullID, uint64 index, uint64 txStatus, bool isEncrypt, string memory errorMsg) private {
-        string memory servicePair = genServicePair(srcFullID, dstFullID);
-        uint64 typ;
-        bytes[] memory result = new bytes[](1);
-        result[0] = bytes(errorMsg);
-        if(txStatus == 0) {
-            invokeIndexUpdate(srcFullID, dstFullID, index, 0);
-            typ = 2;
-        } else {
-            invokeIndexUpdate(srcFullID, dstFullID, index, 2);
-            if(txStatus == 1) {
-                typ = 2;
-            } else {
-                typ = 3;
-            }
-        }
-
-        receiptMessages[servicePair][index] = Receipt(isEncrypt, typ, result);
-
-        if (isEncrypt) {
-            emit throwReceiptEvent(index, dstFullID, srcFullID, typ, false, new bytes[](0), computeHash(result));
-        } else {
-            emit throwReceiptEvent(index, dstFullID, srcFullID, typ, false, result, computeHash(result));
-        }
-    }
-
     function emitInterchainEvent(
         string memory destFullServiceID,
         string memory funcCall,
@@ -413,6 +349,29 @@ contract Broker {
         checkAppchainIdContains(appchainID, destFullServiceID);
         string memory curFullID = genFullServiceID(addressToString(msg.sender));
         string memory outServicePair = genServicePair(curFullID, destFullServiceID);
+
+        {
+            // 直连模式下未注册的remoteService无法发出跨链交易
+            bool flag = false;
+            string[] memory remoteServices = Transaction(directTransactionAddr).getRemoteServiceList();
+            for (uint i = 0; i < remoteServices.length; i++) {
+                if (keccak256(abi.encodePacked(destFullServiceID)) == keccak256(abi.encodePacked(remoteServices[i]))) {
+                    flag = true;
+                    break;
+                }
+            }
+            require(flag == true, "remote service is not registered");
+            flag = false;
+            address[] memory banList = Transaction(directTransactionAddr).getRSWhiteList(destFullServiceID);
+            for (uint i = 0; i < banList.length; i++) {
+                if (msg.sender == banList[i]) {
+                    flag = true;
+                    break;
+                }
+            }
+            require(flag == false, "remote service is not allowed to call dest address");
+        }
+
 
         // Record the order of interchain contract which has been started.
         outCounter[outServicePair]++;
@@ -436,28 +395,11 @@ contract Broker {
             args = new bytes[](0);
         }
 
+        // Start transaction and record current block number in direct mode
+        Transaction(directTransactionAddr).startTransaction(curFullID, destFullServiceID, outCounter[outServicePair]);
+
         // Throw interchain event for listening of plugin.
         emit throwInterchainEvent(outCounter[outServicePair], destFullServiceID, curFullID, funcCall, args, hash);
-    }
-
-
-    // The helper functions that help document Meta information.
-    function markCallbackCounter(string memory servicePair, uint64 index) private {
-        if (callbackCounter[servicePair] == 0) {
-            callbackServicePairs.push(servicePair);
-        }
-        callbackCounter[servicePair] = index;
-    }
-
-    function markDstRollbackCounter(string memory servicePair, uint64 index) private {
-        dstRollbackCounter[servicePair] = index;
-    }
-
-    function markInCounter(string memory servicePair) private {
-        inCounter[servicePair]++;
-        if (inCounter[servicePair] == 1) {
-            inServicePairs.push(servicePair);
-        }
     }
 
     // The helper functions that help plugin query.
@@ -507,6 +449,11 @@ contract Broker {
         return (inServicePairs, indices);
     }
 
+    // get transaction start timestamp and transaction status in direct mode
+    function getDirectTransactionMeta(string memory id) public view returns (uint, uint64) {
+        return (Transaction(directTransactionAddr).getStartTimestamp(id), Transaction(directTransactionAddr).getTransactionStatus(id));
+    }
+
     function genFullServiceID(string memory serviceID) private view returns (string memory) {
         return string(abi.encodePacked(bitxhubID, ":", appchainID, ":", serviceID));
     }
@@ -519,100 +466,114 @@ contract Broker {
         return (bitxhubID, appchainID);
     }
 
-    function checkInterchainMultiSigns(string memory srcFullID,
-        string memory dstFullID,
-        uint64 index,
-        uint64 typ,
-        string memory callFunc,
-        bytes[] memory args,
-        uint64 txStatus,
-        bytes[] memory multiSignatures) private returns(bool) {
-        bytes memory packed = abi.encodePacked(srcFullID, dstFullID, index, typ);
-        bytes memory funcPacked = abi.encodePacked(callFunc);
+    function invokeIndexUpdate(string memory srcFullID, string memory dstFullID, uint64 index, uint64 reqType) private {
+        string memory servicePair = genServicePair(srcFullID, dstFullID);
+        if (reqType == 0) {
+            require(inCounter[servicePair] + 1 == index);
+            markInCounter(servicePair);
+        } else if (reqType == 1) {
+            // invoke src callback or rollback
+            require(callbackCounter[servicePair] + 1 == index);
+            markCallbackCounter(servicePair, index);
+        } else if (reqType == 2) {
+            // invoke dst rollback
+            require(dstRollbackCounter[servicePair] + 1 <= index);
+            markDstRollbackCounter(servicePair, index);
+            if (inCounter[servicePair] + 1 == index) {
+                markInCounter(servicePair);
+            }
+        }
+    }
+
+    // The helper functions that help document Meta information.
+    function markCallbackCounter(string memory servicePair, uint64 index) private {
+        if (callbackCounter[servicePair] == 0) {
+            callbackServicePairs.push(servicePair);
+        }
+        callbackCounter[servicePair] = index;
+    }
+
+    function markDstRollbackCounter(string memory servicePair, uint64 index) private {
+        dstRollbackCounter[servicePair] = index;
+    }
+
+    function markInCounter(string memory servicePair) private {
+        inCounter[servicePair]++;
+        if (inCounter[servicePair] == 1) {
+            inServicePairs.push(servicePair);
+        }
+    }
+
+    function callService(address destAddr, string memory callFunc, bytes[] memory args, bool isRollback) private returns (bool, bytes[] memory) {
+        bool status = true;
+        bytes[] memory result;
+
+        if (keccak256(abi.encodePacked(callFunc)) != keccak256(abi.encodePacked(""))) {
+            (bool ok, bytes memory data) = address(destAddr).call(abi.encodeWithSignature(string(abi.encodePacked(callFunc, "(bytes[],bool)")), args, isRollback));
+            status = ok;
+            if (status) {
+                result = abi.decode(data, (bytes[]));
+            }
+        }
+
+        return (status, result);
+    }
+
+    function computeHash(bytes[] memory args) internal pure returns (bytes32) {
+        bytes memory packed;
         for (uint i = 0; i < args.length; i++) {
-            funcPacked = abi.encodePacked(funcPacked, args[i]);
+            packed = abi.encodePacked(packed, args[i]);
         }
-        packed = abi.encodePacked(packed, keccak256(funcPacked), txStatus);
-        bytes32 hash = keccak256(packed);
 
-        //require(checkMultiSigns(hash, multiSignatures), "invalid multi-signature");
-        return checkMultiSigns(hash, multiSignatures);
+        return keccak256(packed);
     }
 
-    function checkReceiptMultiSigns(string memory srcFullID,
-        string memory dstFullID,
-        uint64 index,
-        uint64 typ,
-        bytes[] memory result,
-        uint64 txStatus,
-        bytes[] memory multiSignatures) private {
-        bytes memory packed = abi.encodePacked(srcFullID, dstFullID, index, typ);
-        bytes memory data;
-        if (typ == 0) {
-            string memory outServicePair = genServicePair(srcFullID, dstFullID);
-            CallFunc memory callFunc = outMessages[outServicePair][index].callFunc;
-            data = abi.encodePacked(data, callFunc.func);
-            for (uint i = 0; i < callFunc.args.length; i++) {
-                data = abi.encodePacked(data, callFunc.args[i]);
-            }
-        } else {
-            for (uint i = 0; i < result.length; i++) {
-                data = abi.encodePacked(data, result[i]);
+    function checkService(string memory remoteService, address destAddr) private view {
+        require(localWhiteList[destAddr] == true, "dest address is not in local white list");
+
+        bool flag = false;
+        string[] memory remoteServices = Transaction(directTransactionAddr).getRemoteServiceList();
+        for (uint i = 0; i < remoteServices.length; i++) {
+            if (keccak256(abi.encodePacked(remoteService)) == keccak256(abi.encodePacked(remoteServices[i]))) {
+                flag = true;
+                break;
             }
         }
-        packed = abi.encodePacked(packed, keccak256(data), txStatus);
-        bytes32 hash = keccak256(packed);
+        require(flag == true, "remote service is not registered");
 
-        require(checkMultiSigns(hash, multiSignatures), "invalid multi-signature");
+        flag = false;
+        address[] memory banList = Transaction(directTransactionAddr).getRSWhiteList(remoteService);
+        for (uint i = 0; i < banList.length; i++) {
+            if (destAddr == banList[i]) {
+                flag = true;
+                break;
+            }
+        }
+        require(flag == false, "remote service is not allowed to call dest address");
     }
 
-    function checkMultiSigns(bytes32 hash, bytes[] memory multiSignatures) private returns (bool) {
-        for (uint i = 0; i < multiSignatures.length; i++) {
-            bytes memory sig = multiSignatures[i];
-            if (sig.length != 65) {
-                continue;
-            }
+    function checkAppchainIdContains (string memory appchainId, string memory destFullService) private pure {
+        // todo: check failed with substring
+        bytes memory whatBytes = bytes (appchainId);
+        bytes memory whereBytes = bytes (destFullService);
 
-            (uint8 v, bytes32 r, bytes32 s) = splitSignature(sig);
+        require(whereBytes.length >= whatBytes.length);
 
-            address addr = ecrecover(hash, v, r, s);
-
-            if (addressArrayContains(validators, addr)) {
-                if (addressArrayContains(bxhSigners, addr)) {
-                    continue;
+        bool found = false;
+        for (uint i = 0; i <= whereBytes.length - whatBytes.length; i++) {
+            bool flag = true;
+            for (uint j = 0; j < whatBytes.length; j++)
+                if (whereBytes [i + j] != whatBytes [j]) {
+                    flag = false;
+                    break;
                 }
-                bxhSigners.push(addr);
-                if (bxhSigners.length == valThreshold) {
-                    delete bxhSigners;
-                    return true;
-                }
+            if (flag) {
+                found = true;
+                break;
             }
         }
-        delete bxhSigners;
-        return false;
-    }
-
-    function addressArrayContains(address[] memory addrs, address addr) private pure returns (bool) {
-        for (uint i = 0; i < addrs.length; i++) {
-            if (addrs[i] == addr) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    function splitSignature(bytes memory sig) internal pure returns (uint8 v, bytes32 r, bytes32 s) {
-        assembly {
-        // first 32 bytes, after the length prefix
-            r := mload(add(sig, 32))
-        // second 32 bytes
-            s := mload(add(sig, 64))
-        // final byte (first byte of the next 32 bytes)
-            v := byte(0, mload(add(sig, 96)))
-        }
-
-        return (v + 27, r, s);
+        // 不允许同broker服务自跨链
+        require(!found, "dest service is belong to current broker!");
     }
 
     function _getAsciiOffset(
@@ -769,27 +730,32 @@ contract Broker {
         }
         return address(result);
     }
+}
 
-    function checkAppchainIdContains (string memory appchainId, string memory destFullService) private pure {
-        bytes memory whatBytes = bytes (appchainId);
-        bytes memory whereBytes = bytes (destFullService);
+abstract contract Transaction {
+    function initialize() public virtual;
 
-        require(whereBytes.length >= whatBytes.length);
+    function registerAppchain(string memory chainID, string memory broker, address ruleAddr, bytes memory trustRoot) public virtual;
 
-        bool found = false;
-        for (uint i = 0; i <= whereBytes.length - whatBytes.length; i++) {
-            bool flag = true;
-            for (uint j = 0; j < whatBytes.length; j++)
-                if (whereBytes [i + j] != whatBytes [j]) {
-                    flag = false;
-                    break;
-                }
-            if (flag) {
-                found = true;
-                break;
-            }
-        }
-        // 不允许同broker服务自跨链
-        require(!found, "dest service is belong to current broker!");
-    }
+    function getAppchainInfo(string memory chainID) public view virtual returns (string memory, bytes memory, address);
+
+    function registerRemoteService(string memory chainID, string memory serviceID, address[] memory whiteList) public virtual;
+
+    function getRSWhiteList(string memory remoteAddr) public view virtual returns (address[] memory);
+
+    function getRemoteServiceList() public view virtual returns (string[] memory);
+
+    function startTransaction(string memory from, string memory to, uint64 index) public virtual;
+
+    function rollbackTransaction(string memory from, string memory to, uint64 index) public virtual;
+
+    function endTransactionSuccess(string memory from, string memory to, uint64 index) public virtual;
+
+    function endTransactionFail(string memory from, string memory to, uint64 index) public virtual;
+
+    function endTransactionRollback(string memory from, string memory to, uint64 index) public virtual;
+
+    function getTransactionStatus(string memory IBTPid) public view virtual returns (uint64);
+
+    function getStartTimestamp(string memory IBTPid) public view virtual returns (uint);
 }

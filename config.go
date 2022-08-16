@@ -9,6 +9,8 @@ import (
 
 const (
 	configName = "ethereum.toml"
+	directMode = "direct"
+	relayMode  = "relay"
 )
 
 type Config struct {
