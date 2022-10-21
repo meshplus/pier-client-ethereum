@@ -7,6 +7,7 @@ require (
 	github.com/StackExchange/wmi v1.2.1 // indirect
 	github.com/ethereum/go-ethereum v1.10.7
 	github.com/fatih/color v1.9.0
+	github.com/gin-gonic/gin v1.8.1
 	github.com/gobuffalo/packd v1.0.0
 	github.com/gobuffalo/packr v1.30.1
 	github.com/hashicorp/go-hclog v0.0.0-20180709165350-ff2cf002a8dd

@@ -47,8 +47,3 @@ func generateReceipt(from, to string, idx uint64, data [][]byte, typ uint64, enc
 		Payload:       pd,
 	}, nil
 }
-
-// TODO
-func unpackToBytesArray(data []byte) ([][]byte, error) {
-	return nil, nil
-}

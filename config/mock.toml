@@ -1,0 +1,7 @@
+[mock]
+name = "ether"
+timeout_height = 100
+bxhId = "1356"
+chainId = "testChain"
+serviceList = ["myService"]
+port = "8081"

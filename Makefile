@@ -15,10 +15,10 @@ help: Makefile
 	@sed -n 's/^##//p' $< | column -t -s ':' | sed -e 's/^/ /'
 
 ## make eth: build ethereum client plugin
-eth:
+mock:
 	@packr
 	mkdir -p build
-	$(GO) build -o build/eth-client ./*.go
+	$(GO) build -o build/mock-client ./*.go
 
 docker:
 	mkdir -p build

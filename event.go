@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/meshplus/bitxhub-model/pb"
@@ -28,15 +29,6 @@ func (c *Client) Convert2IBTP(ev *BrokerThrowInterchainEvent, timeoutHeight int6
 	}, nil
 }
 
-func (c *Client) Convert2Receipt(ev *BrokerThrowReceiptEvent) (*pb.IBTP, error) {
-	fullEv, encrypt, err := c.fillReceiptEvent(ev)
-	if err != nil {
-		return nil, err
-	}
-
-	return generateReceipt(fullEv.SrcFullID, fullEv.DstFullID, fullEv.Index, fullEv.Result, fullEv.Typ, encrypt)
-}
-
 func encodePayload(ev *BrokerThrowInterchainEvent, encrypt bool) ([]byte, error) {
 	var args [][]byte
 	for _, arg := range ev.Args {
@@ -60,52 +52,30 @@ func encodePayload(ev *BrokerThrowInterchainEvent, encrypt bool) ([]byte, error)
 }
 
 func (c *Client) fillInterchainEvent(ev *BrokerThrowInterchainEvent) (*BrokerThrowInterchainEvent, bool, error) {
-	if ev.Func == "" {
-		fun, args, encrypt, err := c.session.GetOutMessage(pb.GenServicePair(ev.SrcFullID, ev.DstFullID), ev.Index)
-		if err != nil {
-			return nil, false, err
+	ev.Func = "interchainCharge"
+	var args [][]byte
+	args = append(args, []byte("alice"))
+	args = append(args, []byte("bob"))
+	args = append(args, IntToBytes(10))
+	ev.Args = args
+	emptyHash := common.Hash{}
+
+	if bytes.Equal(ev.Hash[:], emptyHash[:]) {
+		var data []byte
+		data = append(data, []byte(ev.Func)...)
+		for _, arg := range args {
+			data = append(data, []byte(arg)...)
 		}
 
-		ev.Func = fun
-		ev.Args = args
-		emptyHash := common.Hash{}
-
-		if bytes.Equal(ev.Hash[:], emptyHash[:]) {
-			var data []byte
-			data = append(data, []byte(fun)...)
-			for _, arg := range args {
-				data = append(data, []byte(arg)...)
-			}
-
-			ev.Hash = common.BytesToHash(crypto.Keccak256(data))
-		}
-
-		return ev, encrypt, nil
+		ev.Hash = common.BytesToHash(crypto.Keccak256(data))
 	}
 
 	return ev, false, nil
 }
 
-func (c *Client) fillReceiptEvent(ev *BrokerThrowReceiptEvent) (*BrokerThrowReceiptEvent, bool, error) {
-	if ev.Result == nil {
-		result, typ, encrypt, err := c.session.GetReceiptMessage(pb.GenServicePair(ev.SrcFullID, ev.DstFullID), ev.Index)
-		if err != nil {
-			return nil, false, err
-		}
-		ev.Result = result
-		ev.Typ = typ
-
-		emptyHash := common.Hash{}
-		if bytes.Equal(ev.Hash[:], emptyHash[:]) {
-			var packed []byte
-			for _, ele := range result {
-				packed = append(packed, ele...)
-			}
-			ev.Hash = common.BytesToHash(crypto.Keccak256(packed))
-		}
-
-		return ev, encrypt, nil
-	}
-
-	return ev, false, nil
+func IntToBytes(n int) []byte {
+	x := uint64(n)
+	bytesBuffer := bytes.NewBuffer([]byte{})
+	binary.Write(bytesBuffer, binary.BigEndian, x)
+	return bytesBuffer.Bytes()
 }
