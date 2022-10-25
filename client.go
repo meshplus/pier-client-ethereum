@@ -3,12 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
-	"sync"
-
 	"github.com/hashicorp/go-hclog"
 	"github.com/meshplus/bitxhub-model/pb"
 	"github.com/meshplus/pier/pkg/plugins"
+	"github.com/sirupsen/logrus"
+	"os"
+	"sync"
+	"time"
 )
 
 type Client struct {
@@ -120,6 +121,8 @@ func (c *Client) SubmitReceipt(to string, index uint64, serviceID string, ibtpTy
 	c.lock.Lock()
 	c.interchainInfo.callbackCounter[servicePair]++
 	c.lock.Unlock()
+
+	logrus.Errorf("FINISH SUBMIT RECEIPT WITH TIMESTAMP %d AND INDEX %d", time.Now().UnixNano(), index)
 
 	return ret, nil
 }

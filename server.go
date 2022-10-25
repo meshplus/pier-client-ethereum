@@ -62,13 +62,13 @@ func (s *Server) invoke(c *gin.Context) {
 
 	servicePair := fmt.Sprintf("%s-%s", req.From, req.To)
 	s.client.lock.Lock()
+	defer s.client.lock.Unlock()
 	s.client.interchainInfo.outCounter[servicePair]++
 	ev := &BrokerThrowInterchainEvent{
 		Index:     s.client.interchainInfo.outCounter[servicePair],
 		DstFullID: req.To,
 		SrcFullID: req.From,
 	}
-	s.client.lock.Unlock()
 
 	ibtp, err := s.client.Convert2IBTP(ev, int64(s.client.config.Mock.TimeoutHeight))
 	if err != nil {
