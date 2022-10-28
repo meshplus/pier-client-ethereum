@@ -16,7 +16,7 @@ help: Makefile
 
 ## make eth: build ethereum client plugin
 eth:
-	@packr
+	@packr2
 	mkdir -p build
 	$(GO) build -o build/eth-client ./*.go
 
