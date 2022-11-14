@@ -103,6 +103,7 @@ func (c *Client) SubmitIBTP(from string, index uint64, serviceID string, ibtpTyp
 	var result [][]byte
 	result = append(result, []byte("0"))
 	receipt, _ := generateReceipt(from, to, index, result, uint64(pb.IBTP_RECEIPT_SUCCESS), false)
+	receipt.Timestamp = time.Now().UnixNano()
 	c.eventC <- receipt
 
 	servicePair := fmt.Sprintf("%s-%s", from, to)
@@ -135,6 +136,7 @@ func (c *Client) SubmitIBTPBatch(from []string, index []uint64, serviceID []stri
 		var result [][]byte
 		result = append(result, []byte("0"))
 		receipt, _ := generateReceipt(src, to, index[idx], result, uint64(pb.IBTP_RECEIPT_SUCCESS), false)
+		receipt.Timestamp = time.Now().UnixNano()
 		c.eventC <- receipt
 
 		servicePair := fmt.Sprintf("%s-%s", src, to)

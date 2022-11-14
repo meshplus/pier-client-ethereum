@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"net/http"
+	"time"
 )
 
 type Server struct {
@@ -75,6 +76,7 @@ func (s *Server) invoke(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, err)
 	}
 
+	ibtp.Timestamp = time.Now().UnixNano()
 	s.client.eventC <- ibtp
 	c.JSON(http.StatusOK, "send successfully!")
 }
