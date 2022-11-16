@@ -135,7 +135,11 @@ func (c *Client) SubmitIBTPBatch(from []string, index []uint64, serviceID []stri
 		to := fmt.Sprintf("%s:%s:%s", c.config.Mock.BxhId, c.config.Mock.ChainId, serviceID[idx])
 		var result [][]byte
 		result = append(result, []byte("0"))
-		receipt, _ := generateReceipt(src, to, index[idx], result, uint64(pb.IBTP_RECEIPT_SUCCESS), false)
+		receipt, err := generateReceipt(src, to, index[idx], result, uint64(pb.IBTP_RECEIPT_SUCCESS), false)
+		if err != nil {
+			logger.Error(err.Error())
+			return nil, err
+		}
 		receipt.Timestamp = time.Now().UnixNano()
 		c.eventC <- receipt
 
