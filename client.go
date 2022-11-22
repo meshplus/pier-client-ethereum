@@ -73,6 +73,24 @@ func (c *Client) Initialize(configPath string, extra []byte, mode string) error 
 }
 
 func (c *Client) Start() error {
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		var currentCounter uint64 = 0
+		for {
+			select {
+			case <-ticker.C:
+				c.lock.Lock()
+				for _, v := range c.interchainInfo.callbackCounter {
+					logger.Info("Average TPS: %d", v-currentCounter)
+					currentCounter = v
+				}
+				c.lock.Unlock()
+			case <-c.ctx.Done():
+				ticker.Stop()
+				break
+			}
+		}
+	}()
 	return nil
 }
 
