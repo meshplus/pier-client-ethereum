@@ -35,6 +35,7 @@ func (s *Server) Start() error {
 	v1 := s.router.Group("/v1")
 	{
 		v1.POST("send", s.invoke)
+		v1.GET("tps", s.getMeta)
 	}
 
 	go func() {
@@ -79,4 +80,16 @@ func (s *Server) invoke(c *gin.Context) {
 	ibtp.Timestamp = time.Now().UnixNano()
 	s.client.eventC <- ibtp
 	c.JSON(http.StatusOK, "send successfully!")
+}
+
+func (s *Server) getMeta(c *gin.Context) {
+	meta, err := s.client.GetCallbackMeta()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, err)
+	}
+	var counter uint64
+	for _, v := range meta {
+		counter = v
+	}
+	c.JSON(http.StatusOK, counter)
 }
