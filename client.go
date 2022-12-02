@@ -81,7 +81,7 @@ func (c *Client) Start() error {
 			case <-ticker.C:
 				c.lock.Lock()
 				for _, v := range c.interchainInfo.callbackCounter {
-					logger.Info("Average TPS: %d", v-currentCounter)
+					logger.Info("Average TPS", "TPS", v-currentCounter)
 					currentCounter = v
 				}
 				c.lock.Unlock()
