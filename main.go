@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/gobuffalo/packr/v2"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -8,7 +9,6 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/gobuffalo/packd"
-	"github.com/gobuffalo/packr"
 	"github.com/hashicorp/go-plugin"
 	"github.com/meshplus/pier/pkg/plugins"
 	"github.com/urfave/cli"

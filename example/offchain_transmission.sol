@@ -27,11 +27,11 @@ contract OffChainTransmission {
 
     constructor(address _brokerAddr) public {
         BrokerAddr = _brokerAddr;
-        Broker(BrokerAddr).register();
+        Broker(BrokerAddr).register(true);
     }
 
     function register() public {
-        Broker(BrokerAddr).register();
+        Broker(BrokerAddr).register(true);
     }
 
     // contract for data exchange
@@ -123,5 +123,5 @@ abstract contract Broker {
         bytes[] memory argsRb,
         bool isEncrypt) public virtual;
 
-    function register() public virtual;
+    function register(bool ordered) public virtual;
 }

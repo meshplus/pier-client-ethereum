@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/meshplus/bitxhub-core/agency"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -22,7 +23,6 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/hashicorp/go-hclog"
 	"github.com/meshplus/bitxhub-model/pb"
-	"github.com/meshplus/pier/pkg/plugins"
 )
 
 //go:generate abigen --sol ./example/broker.sol --pkg main --out broker.go
@@ -40,8 +40,8 @@ type Client struct {
 }
 
 var (
-	_      plugins.Client = (*Client)(nil)
-	logger                = hclog.New(&hclog.LoggerOptions{
+	_      agency.Client = (*Client)(nil)
+	logger               = hclog.New(&hclog.LoggerOptions{
 		Name:   "client",
 		Output: os.Stderr,
 		Level:  hclog.Trace,
@@ -586,29 +586,17 @@ func (c *Client) GetAppchainInfo(chainID string) (string, []byte, string, error)
 	return broker, trustRoot, ruleAddr.String(), nil
 }
 
-func (c *Client) GetOffChainData(request *pb.GetDataRequest) (*pb.GetDataResponse, error) {
+func (c *Client) GetOffChainData(request *pb.GetDataRequest) (*pb.OffChainDataInfo, error) {
 	fi, err := os.Stat(string(request.Req))
 	if err != nil {
 		return nil, fmt.Errorf("get file stat failed: %w", err)
 	}
 
-	resp := constructResp(request)
-	if fi.Size() > 2*1024*1024 {
-		resp.Type = pb.GetDataResponse_DATA_OUT_OF_SIZE
-		resp.Msg = fmt.Sprintf("the file is out of max size 2 MB")
-	}
-
-	// download file with path
-	data, err := ioutil.ReadFile(string(request.Req))
-	if err != nil {
-		return nil, fmt.Errorf("download file failed: %w", err)
-	}
-
-	resp.Type = pb.GetDataResponse_DATA_GET_SUCCESS
-	resp.Data = data
-	resp.Msg = fi.Name()
-
-	return resp, nil
+	return &pb.OffChainDataInfo{
+		Filename: fi.Name(),
+		Filesize: fi.Size(),
+		Filepath: string(request.Req),
+	}, nil
 }
 
 func (c *Client) GetOffChainDataReq() chan *pb.GetDataRequest {
@@ -617,9 +605,40 @@ func (c *Client) GetOffChainDataReq() chan *pb.GetDataRequest {
 
 func (c *Client) SubmitOffChainData(response *pb.GetDataResponse) error {
 	if response.Type == pb.GetDataResponse_DATA_GET_SUCCESS {
-		// save offChain data
-		if err := ioutil.WriteFile(filepath.Join(c.config.Ether.OffChainPath, response.Msg), response.Data, 0644); err != nil {
-			return fmt.Errorf("save offChain data: %w", err)
+		//// download offChain data
+		//path := filepath.Join(string(response.Data), response.Msg)
+		//data, err := ioutil.ReadFile(path)
+		//if err != nil {
+		//	return fmt.Errorf("download offChain data with path(%s): %w", path, err)
+		//}
+		//
+		//// save offChain data
+		//if err := ioutil.WriteFile(filepath.Join(c.config.Ether.OffChainPath, response.Msg), data, 0644); err != nil {
+		//	return fmt.Errorf("save offChain data: %w", err)
+		//}
+		//return nil
+		name := response.Msg + "-" + time.Now().Format("2006.01.02-15:04:05")
+		savePath := filepath.Join(c.config.Ether.OffChainPath, name)
+		mf, err := os.OpenFile(savePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, os.ModePerm)
+		if err != nil {
+			return err
+		}
+		defer mf.Close()
+
+		var sf *os.File
+		defer sf.Close()
+		for i := uint64(1); i <= response.ShardTag.ShardSize; i++ {
+			name := fmt.Sprintf("%s-%s-%d-%d-%d", response.From, response.To, response.Index, i, response.ShardTag.ShardSize)
+			path := filepath.Join(string(response.Data), name)
+			sf, err = os.Open(path)
+			if err != nil {
+				return err
+			}
+			data, err := ioutil.ReadAll(sf)
+			if err != nil {
+				return err
+			}
+			mf.Write(data)
 		}
 		return nil
 	}
