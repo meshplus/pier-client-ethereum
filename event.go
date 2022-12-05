@@ -2,6 +2,10 @@ package main
 
 import (
 	"bytes"
+	"fmt"
+	"strconv"
+	"strings"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/meshplus/bitxhub-model/pb"
@@ -16,7 +20,10 @@ func (c *Client) Convert2IBTP(ev *BrokerThrowInterchainEvent, timeoutHeight int6
 	if err != nil {
 		return nil, err
 	}
-
+	group, err := c.fillGroup(fullEv.Group)
+	if err != nil {
+		return nil, err
+	}
 	return &pb.IBTP{
 		From:          ev.SrcFullID,
 		To:            ev.DstFullID,
@@ -25,6 +32,31 @@ func (c *Client) Convert2IBTP(ev *BrokerThrowInterchainEvent, timeoutHeight int6
 		TimeoutHeight: timeoutHeight,
 		Proof:         []byte("1"),
 		Payload:       pd,
+		Group:         group,
+	}, nil
+}
+
+func (c *Client) fillGroup(evGroup []string) (*pb.StringUint64Map, error) {
+	if len(evGroup) == 0 {
+		return nil, nil
+	}
+	keys := make([]string, len(evGroup))
+	values := make([]uint64, len(evGroup))
+	for i, str := range evGroup {
+		group := strings.Split(str, "-")
+		if len(group) != 2 {
+			return nil, fmt.Errorf("input group err: %s", str)
+		}
+		keys[i] = group[0]
+		v, err := strconv.Atoi(group[1])
+		if err != nil {
+			return nil, fmt.Errorf("convert group value %s err:%s", group[i], err)
+		}
+		values[i] = uint64(v)
+	}
+	return &pb.StringUint64Map{
+		Keys: keys,
+		Vals: values,
 	}, nil
 }
 
@@ -61,13 +93,14 @@ func encodePayload(ev *BrokerThrowInterchainEvent, encrypt bool) ([]byte, error)
 
 func (c *Client) fillInterchainEvent(ev *BrokerThrowInterchainEvent) (*BrokerThrowInterchainEvent, bool, error) {
 	if ev.Func == "" {
-		fun, args, encrypt, err := c.session.GetOutMessage(pb.GenServicePair(ev.SrcFullID, ev.DstFullID), ev.Index)
+		fun, args, encrypt, group, err := c.session.GetOutMessage(pb.GenServicePair(ev.SrcFullID, ev.DstFullID), ev.Index)
 		if err != nil {
 			return nil, false, err
 		}
 
 		ev.Func = fun
 		ev.Args = args
+		ev.Group = group
 		emptyHash := common.Hash{}
 
 		if bytes.Equal(ev.Hash[:], emptyHash[:]) {

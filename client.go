@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Rican7/retry"
@@ -37,6 +38,7 @@ type Client struct {
 	sessionDirect *BrokerDirectSession
 	eventC        chan *pb.IBTP
 	reqCh         chan *pb.GetDataRequest
+	lock          sync.Mutex
 }
 
 var (
@@ -49,13 +51,11 @@ var (
 	EtherType = "ethereum"
 )
 
-const InvokeInterchain = "invokeInterchain"
-
 func (c *Client) GetUpdateMeta() chan *pb.UpdateMeta {
 	panic("implement me")
 }
 
-func (c *Client) Initialize(configPath string, extra []byte, mode string) error {
+func (c *Client) Initialize(configPath string, _ []byte, mode string) error {
 	cfg, err := UnmarshalConfig(configPath)
 	if err != nil {
 		return fmt.Errorf("unmarshal config for plugin :%w", err)
@@ -140,7 +140,6 @@ func (c *Client) Initialize(configPath string, extra []byte, mode string) error 
 	c.ethClient = etherCli
 	c.abi = ab
 	c.ctx, c.cancel = context.WithCancel(context.Background())
-
 	return nil
 }
 
@@ -301,11 +300,12 @@ func (c *Client) SubmitIBTPBatch(from []string, index []uint64, serviceID []stri
 	return ret, nil
 }
 
-func (c *Client) SubmitReceiptBatch(to []string, index []uint64, serviceID []string, ibtpType []pb.IBTP_Type, result []*pb.Result, proof []*pb.BxhProof) (*pb.SubmitIBTPResponse, error) {
+func (c *Client) SubmitReceiptBatch(_ []string, _ []uint64, _ []string, _ []pb.IBTP_Type, _ []*pb.Result, _ []*pb.BxhProof) (*pb.SubmitIBTPResponse, error) {
 	panic("implement me")
 }
 
 func (c *Client) invokeInterchain(srcFullID string, index uint64, destAddr string, reqType uint64, callFunc string, args [][]byte, txStatus uint64, multiSign [][]byte, encrypt bool) (*types.Receipt, error) {
+	c.lock.Lock()
 	var tx *types.Transaction
 	var txErr error
 	if err := retry.Retry(func(attempt uint) error {
@@ -345,15 +345,16 @@ func (c *Client) invokeInterchain(srcFullID string, index uint64, destAddr strin
 	}, strategy.Wait(2*time.Second)); err != nil {
 		logger.Error("Can't invoke contract", "error", err)
 	}
+	c.lock.Unlock()
 
 	if txErr != nil {
 		return nil, txErr
 	}
-
 	return c.waitForConfirmed(tx.Hash()), nil
 }
 
 func (c *Client) invokeReceipt(srcAddr string, dstFullID string, index uint64, reqType uint64, result [][]byte, txStatus uint64, multiSign [][]byte) (*types.Receipt, error) {
+	c.lock.Lock()
 	var tx *types.Transaction
 	var txErr error
 	if err := retry.Retry(func(attempt uint) error {
@@ -391,7 +392,7 @@ func (c *Client) invokeReceipt(srcAddr string, dstFullID string, index uint64, r
 	}, strategy.Wait(2*time.Second)); err != nil {
 		logger.Error("Can't invoke contract", "error", err)
 	}
-
+	c.lock.Unlock()
 	if txErr != nil {
 		return nil, txErr
 	}
@@ -425,7 +426,7 @@ func (c *Client) GetOutMessage(servicePair string, idx uint64) (*pb.IBTP, error)
 	}
 }
 
-// GetInMessage gets the execution results from contract by from-index key
+// GetReceiptMessage gets the execution results from contract by from-index key
 func (c *Client) GetReceiptMessage(servicePair string, idx uint64) (*pb.IBTP, error) {
 	var (
 		data    [][]byte

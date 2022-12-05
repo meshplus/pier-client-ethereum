@@ -10,6 +10,9 @@ ifeq (docker,$(firstword $(MAKECMDGOALS)))
   $(eval $(DOCKER_ARGS):;@:)
 endif
 
+GREEN=\033[0;32m
+NC=\033[0m
+
 help: Makefile
 	@echo "Choose a command run:"
 	@sed -n 's/^##//p' $< | column -t -s ':' | sed -e 's/^/ /'
@@ -19,6 +22,7 @@ eth:
 	@packr2
 	mkdir -p build
 	$(GO) build -o build/eth-client ./*.go
+	@printf "${GREEN}Build eth-client successfully!${NC}\n"
 
 docker:
 	mkdir -p build

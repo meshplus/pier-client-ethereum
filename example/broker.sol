@@ -17,6 +17,7 @@ contract Broker {
 
     struct InterchainInvoke {
         bool encrypt;
+        string[] group;
         CallFunc callFunc;
         CallFunc callback;
         CallFunc rollback;
@@ -44,7 +45,7 @@ contract Broker {
 
     address[] bxhSigners;
 
-    event throwInterchainEvent(uint64 index, string dstFullID, string srcFullID, string func, bytes[] args, bytes32 hash);
+    event throwInterchainEvent(uint64 index, string dstFullID, string srcFullID, string func, bytes[] args, bytes32 hash, string[] group);
     event throwReceiptEvent(uint64 index, string dstFullID, string srcFullID, uint64 typ, bool status, bytes[] result, bytes32 hash);
     event throwReceiptStatus(bool);
 
@@ -408,7 +409,8 @@ contract Broker {
         bytes[] memory argsCb,
         string memory funcRb,
         bytes[] memory argsRb,
-        bool isEncrypt)
+        bool isEncrypt,
+        string[] memory group)
     public onlyWhiteList {
         checkAppchainIdContains(appchainID, destFullServiceID);
         string memory curFullID = genFullServiceID(addressToString(msg.sender));
@@ -420,7 +422,7 @@ contract Broker {
             outServicePairs.push(outServicePair);
         }
 
-        outMessages[outServicePair][outCounter[outServicePair]] = InterchainInvoke(isEncrypt,
+        outMessages[outServicePair][outCounter[outServicePair]] = InterchainInvoke(isEncrypt, group,
             CallFunc(funcCall, args),
             CallFunc(funcCb, argsCb),
             CallFunc(funcRb, argsRb));
@@ -437,7 +439,7 @@ contract Broker {
         }
 
         // Throw interchain event for listening of plugin.
-        emit throwInterchainEvent(outCounter[outServicePair], destFullServiceID, curFullID, funcCall, args, hash);
+        emit throwInterchainEvent(outCounter[outServicePair], destFullServiceID, curFullID, funcCall, args, hash, group);
     }
 
 
@@ -470,9 +472,9 @@ contract Broker {
         return (outServicePairs, indices);
     }
 
-    function getOutMessage(string memory outServicePair, uint64 idx) public view returns (string memory, bytes[] memory, bool) {
+    function getOutMessage(string memory outServicePair, uint64 idx) public view returns (string memory, bytes[] memory, bool, string[] memory) {
         InterchainInvoke memory invoke = outMessages[outServicePair][idx];
-        return (invoke.callFunc.func, invoke.callFunc.args, invoke.encrypt);
+        return (invoke.callFunc.func, invoke.callFunc.args, invoke.encrypt, invoke.group);
     }
 
     function getReceiptMessage(string memory inServicePair, uint64 idx) public view returns (bytes[] memory, uint64, bool)  {
