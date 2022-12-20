@@ -13,12 +13,15 @@ import (
 )
 
 type Client struct {
-	config         *Config
-	ctx            context.Context
-	cancel         context.CancelFunc
-	eventC         chan *pb.IBTP
-	interchainInfo *Interchain
-	lock           *sync.RWMutex
+	config              *Config
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	eventC              chan *pb.IBTP
+	interchainInfo      *Interchain
+	lock                *sync.RWMutex
+	outCounterlock      *sync.RWMutex
+	inCounterlock       *sync.RWMutex
+	callbackCounterlock *sync.RWMutex
 }
 
 type Interchain struct {
@@ -56,7 +59,9 @@ func (c *Client) Initialize(configPath string, extra []byte, mode string) error 
 		inCounter:       make(map[string]uint64),
 		callbackCounter: make(map[string]uint64),
 	}
-	c.lock = &sync.RWMutex{}
+	c.outCounterlock = &sync.RWMutex{}
+	c.inCounterlock = &sync.RWMutex{}
+	c.callbackCounterlock = &sync.RWMutex{}
 	c.eventC = make(chan *pb.IBTP, 1024)
 	c.ctx, c.cancel = context.WithCancel(context.Background())
 
@@ -79,12 +84,12 @@ func (c *Client) Start() error {
 		for {
 			select {
 			case <-ticker.C:
-				c.lock.Lock()
+				c.callbackCounterlock.Lock()
 				for _, v := range c.interchainInfo.callbackCounter {
 					logger.Info("Average TPS", "TPS", v-currentCounter)
 					currentCounter = v
 				}
-				c.lock.Unlock()
+				c.callbackCounterlock.Unlock()
 			case <-c.ctx.Done():
 				ticker.Stop()
 				break
@@ -125,9 +130,9 @@ func (c *Client) SubmitIBTP(from string, index uint64, serviceID string, ibtpTyp
 	c.eventC <- receipt
 
 	servicePair := fmt.Sprintf("%s-%s", from, to)
-	c.lock.Lock()
+	c.inCounterlock.Lock()
 	c.interchainInfo.inCounter[servicePair]++
-	c.lock.Unlock()
+	c.inCounterlock.Unlock()
 
 	return ret, nil
 }
@@ -137,9 +142,9 @@ func (c *Client) SubmitReceipt(to string, index uint64, serviceID string, ibtpTy
 
 	from := fmt.Sprintf("%s:%s:%s", c.config.Mock.BxhId, c.config.Mock.ChainId, serviceID)
 	servicePair := fmt.Sprintf("%s-%s", from, to)
-	c.lock.Lock()
+	c.callbackCounterlock.Lock()
 	c.interchainInfo.callbackCounter[servicePair]++
-	c.lock.Unlock()
+	c.callbackCounterlock.Unlock()
 
 	logrus.Errorf("FINISH SUBMIT RECEIPT WITH TIMESTAMP %d AND INDEX %d", time.Now().UnixNano(), index)
 
@@ -162,9 +167,9 @@ func (c *Client) SubmitIBTPBatch(from []string, index []uint64, serviceID []stri
 		c.eventC <- receipt
 
 		servicePair := fmt.Sprintf("%s-%s", src, to)
-		c.lock.Lock()
+		c.inCounterlock.Lock()
 		c.interchainInfo.inCounter[servicePair]++
-		c.lock.Unlock()
+		c.inCounterlock.Unlock()
 	}
 
 	return ret, nil
@@ -202,8 +207,8 @@ func (c *Client) GetReceiptMessage(servicePair string, idx uint64) (*pb.IBTP, er
 // GetInMeta queries contract about how many interchain txs have been
 // executed on this appchain for different source chains.
 func (c *Client) GetInMeta() (map[string]uint64, error) {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
+	c.inCounterlock.RLock()
+	defer c.inCounterlock.RUnlock()
 
 	return c.interchainInfo.inCounter, nil
 }
@@ -211,8 +216,8 @@ func (c *Client) GetInMeta() (map[string]uint64, error) {
 // GetOutMeta queries contract about how many interchain txs have been
 // sent out on this appchain to different destination chains.
 func (c *Client) GetOutMeta() (map[string]uint64, error) {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
+	c.outCounterlock.RLock()
+	defer c.outCounterlock.RUnlock()
 
 	return c.interchainInfo.outCounter, nil
 }
@@ -220,8 +225,8 @@ func (c *Client) GetOutMeta() (map[string]uint64, error) {
 // GetCallbackMeta queries contract about how many callback functions have been
 // executed on this appchain from different destination chains.
 func (c *Client) GetCallbackMeta() (map[string]uint64, error) {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
+	c.callbackCounterlock.RLock()
+	defer c.callbackCounterlock.RUnlock()
 
 	return c.interchainInfo.callbackCounter, nil
 }
