@@ -78,6 +78,7 @@ func (s *Server) invoke(c *gin.Context) {
 	}
 
 	ibtp.Timestamp = time.Now().UnixNano()
+	ibtp.Debug = true
 	s.client.eventC <- ibtp
 	c.JSON(http.StatusOK, "send successfully!")
 }
