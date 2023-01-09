@@ -66,7 +66,7 @@ func (c *Client) Convert2Receipt(ev *BrokerThrowReceiptEvent) (*pb.IBTP, error) 
 		return nil, err
 	}
 
-	return generateReceipt(fullEv.SrcFullID, fullEv.DstFullID, fullEv.Index, fullEv.Result, fullEv.Typ, encrypt)
+	return generateReceipt(fullEv.SrcFullID, fullEv.DstFullID, fullEv.Index, fullEv.Results, fullEv.Typ, encrypt, fullEv.MultiStatus)
 }
 
 func encodePayload(ev *BrokerThrowInterchainEvent, encrypt bool) ([]byte, error) {
@@ -120,19 +120,22 @@ func (c *Client) fillInterchainEvent(ev *BrokerThrowInterchainEvent) (*BrokerThr
 }
 
 func (c *Client) fillReceiptEvent(ev *BrokerThrowReceiptEvent) (*BrokerThrowReceiptEvent, bool, error) {
-	if ev.Result == nil {
-		result, typ, encrypt, err := c.session.GetReceiptMessage(pb.GenServicePair(ev.SrcFullID, ev.DstFullID), ev.Index)
+	if ev.Results == nil {
+		results, typ, encrypt, multiStatus, err := c.session.GetReceiptMessage(pb.GenServicePair(ev.SrcFullID, ev.DstFullID), ev.Index)
 		if err != nil {
 			return nil, false, err
 		}
-		ev.Result = result
+		ev.Results = results
 		ev.Typ = typ
+		ev.MultiStatus = multiStatus
 
 		emptyHash := common.Hash{}
 		if bytes.Equal(ev.Hash[:], emptyHash[:]) {
 			var packed []byte
-			for _, ele := range result {
-				packed = append(packed, ele...)
+			for _, ele := range results {
+				for _, result := range ele {
+					packed = append(packed, result...)
+				}
 			}
 			ev.Hash = common.BytesToHash(crypto.Keccak256(packed))
 		}

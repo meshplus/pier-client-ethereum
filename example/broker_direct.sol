@@ -25,7 +25,7 @@ contract BrokerDirect {
     struct Receipt {
         bool encrypt;
         uint64 typ;
-        bytes[] result;
+        bytes[][] result;
     }
 
     // Only the contract in the whitelist can invoke the Broker for interchain operations.
@@ -44,7 +44,7 @@ contract BrokerDirect {
     uint64 public adminThreshold;
 
     event throwInterchainEvent(uint64 index, string dstFullID, string srcFullID, string func, bytes[] args, bytes32 hash);
-    event throwReceiptEvent(uint64 index, string dstFullID, string srcFullID, uint64 typ, bool status, bytes[] result, bytes32 hash);
+    event throwReceiptEvent(uint64 index, string dstFullID, string srcFullID, uint64 typ, bytes[][] results, bytes32 hash, bool[] status);
     event throwReceiptStatus(bool);
 
     string[] outServicePairs;
@@ -240,17 +240,17 @@ contract BrokerDirect {
         string memory dstFullID = genFullServiceID(destAddr);
         string memory servicePair = genServicePair(srcFullID, dstFullID);
 
-        bool status = true;
-        bytes[] memory result;
+        bool[] memory status = new bool[](1);
+        bytes[][] memory result;
         if (txStatus == 0) {
             // INTERCHAIN && BEGIN
             checkService(srcFullID, stringToAddress(destAddr));
 
             if (inCounter[servicePair] < index) {
-                (status, result) = callService(stringToAddress(destAddr), callFunc, args, false);
+                (status[0], result[0]) = callService(stringToAddress(destAddr), callFunc, args, false);
             }
             invokeIndexUpdate(srcFullID, dstFullID, index, 0);
-            if (status) {
+            if (status[0]) {
                 typ = 1;
             } else {
                 typ = 2;
@@ -259,7 +259,7 @@ contract BrokerDirect {
             // INTERCHAIN && FAILURE || INTERCHAIN && ROLLBACK
             if (inCounter[servicePair] >= index) {
                 checkService(srcFullID, stringToAddress(destAddr));
-                (status, result) = callService(stringToAddress(destAddr), callFunc, args, true);
+                (status[0], result[0]) = callService(stringToAddress(destAddr), callFunc, args, true);
             }
             invokeIndexUpdate(srcFullID, dstFullID, index, 2);
             // ROLLBACK -> ROLLBACK_END
@@ -269,9 +269,9 @@ contract BrokerDirect {
         receiptMessages[servicePair][index] = Receipt(isEncrypt, typ, result);
 
         if (isEncrypt) {
-            emit throwReceiptEvent(index, dstFullID, srcFullID, typ, status, new bytes[](0), computeHash(result));
+            emit throwReceiptEvent(index, dstFullID, srcFullID, typ, new bytes[][](0), computeHash(result), status);
         } else {
-            emit throwReceiptEvent(index, dstFullID, srcFullID, typ, status, result, computeHash(result));
+            emit throwReceiptEvent(index, dstFullID, srcFullID, typ, result, computeHash(result), status);
         }
     }
 
@@ -281,7 +281,7 @@ contract BrokerDirect {
         string memory dstFullID,
         uint64 index,
         uint64 typ,
-        bytes[] memory result,
+        bytes[][] memory result,
         uint64 txStatus,
         bytes[] memory signatures) payable external {
         string memory srcFullID = genFullServiceID(srcAddr);
@@ -308,7 +308,7 @@ contract BrokerDirect {
 
         string memory outServicePair = genServicePair(srcFullID, dstFullID);
         CallFunc memory invokeFunc = outMessages[outServicePair][index].callback;
-        bytes[] memory args = new bytes[](invokeFunc.args.length + result.length);
+        bytes[] memory args = new bytes[](invokeFunc.args.length + result[0].length);
 
         if (isRollback) {
             invokeFunc = outMessages[outServicePair][index].rollback;
@@ -320,8 +320,8 @@ contract BrokerDirect {
         }
 
         if (!isRollback) {
-            for (uint i = 0; i < result.length; i++) {
-                args[invokeFunc.args.length + i] = result[i];
+            for (uint i = 0; i < result[0].length; i++) {
+                args[invokeFunc.args.length + i] = result[0][i];
             }
         }
 
@@ -417,7 +417,7 @@ contract BrokerDirect {
         return (invoke.callFunc.func, invoke.callFunc.args, invoke.encrypt);
     }
 
-    function getReceiptMessage(string memory inServicePair, uint64 idx) public view returns (bytes[] memory, uint64, bool)  {
+    function getReceiptMessage(string memory inServicePair, uint64 idx) public view returns (bytes[][] memory, uint64, bool)  {
         Receipt memory receipt = receiptMessages[inServicePair][idx];
         return (receipt.result, receipt.typ, receipt.encrypt);
     }
@@ -519,12 +519,14 @@ contract BrokerDirect {
         return (status, result);
     }
 
-    function computeHash(bytes[] memory args) internal pure returns (bytes32) {
+    function computeHash(bytes[][] memory args) internal pure returns (bytes32) {
         bytes memory packed;
         for (uint i = 0; i < args.length; i++) {
-            packed = abi.encodePacked(packed, args[i]);
+            bytes[] memory arg = args[i];
+            for (uint j = 0; j < arg.length; j++) {
+                packed = abi.encodePacked(packed, arg[j]);
+            }
         }
-
         return keccak256(packed);
     }
 

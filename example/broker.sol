@@ -26,7 +26,14 @@ contract Broker {
     struct Receipt {
         bool encrypt;
         uint64 typ;
-        bytes[] result;
+        bytes[][] results;
+        bool[] multiStatus;
+    }
+
+    struct multiInvokeArgs {
+        string contractAddr;
+        CallFunc invokeFunc;
+        bytes[] arg;
     }
 
     // Only the contract in the whitelist can invoke the Broker for interchain operations.
@@ -46,7 +53,7 @@ contract Broker {
     address[] bxhSigners;
 
     event throwInterchainEvent(uint64 index, string dstFullID, string srcFullID, string func, bytes[] args, bytes32 hash, string[] group);
-    event throwReceiptEvent(uint64 index, string dstFullID, string srcFullID, uint64 typ, bool status, bytes[] result, bytes32 hash);
+    event throwReceiptEvent(uint64 index, string dstFullID, string srcFullID, uint64 typ, bytes[][] results, bytes32 hash, bool[] multiStatus);
     event throwReceiptStatus(bool);
 
     string[] outServicePairs;
@@ -211,10 +218,10 @@ contract Broker {
         uint64[] memory txStatus,
         bytes[][] memory signatures,
         bool[] memory isEncrypt) payable external {
-        for (uint8 i = 0; i <  srcFullID.length; ++i) {
+        for (uint8 i = 0; i < srcFullID.length; ++i) {
             if (serviceOrdered[stringToAddress(destAddr[i])] == true) {
                 string memory dstFullID = genFullServiceID(destAddr[i]);
-                invokeIndexUpdateWithError(srcFullID[i], dstFullID, index[i], txStatus[i], isEncrypt[i], "dst service is not ordered");
+                invokeIndexUpdateWithError(srcFullID[i], dstFullID, index[i], txStatus[i], isEncrypt[i], "dst service is not ordered", uint64(1));
                 continue;
             }
             invokeInterchain(srcFullID[i], destAddr[i], index[i], typ[i], callFunc[i], args[i], txStatus[i], signatures[i], isEncrypt[i]);
@@ -238,25 +245,27 @@ contract Broker {
         {
             bool ok = checkInterchainMultiSigns(srcFullID, dstFullID, index, typ, callFunc, args, txStatus, signatures);
             if (!ok) {
-                invokeIndexUpdateWithError(srcFullID, dstFullID, index, txStatus, isEncrypt, "invalid multi-signature");
+                invokeIndexUpdateWithError(srcFullID, dstFullID, index, txStatus, isEncrypt, "invalid interchain-multi-signature", uint64(1));
                 return;
             }
 
             if (localWhiteList[stringToAddress(destAddr)] == false) {
-                invokeIndexUpdateWithError(srcFullID, dstFullID, index, txStatus, isEncrypt, "dest address is not in local white list");
+                invokeIndexUpdateWithError(srcFullID, dstFullID, index, txStatus, isEncrypt, "dest address is not in local white list", uint64(1));
                 return;
             }
         }
 
-        bool status = true;
-        bytes[] memory result;
+        //        bool status = true;
+        bool[] memory status = new bool[](1);
+        status[0] = true;
+        bytes[][] memory results = new bytes[][](1);
         if (txStatus == 0) {
             // INTERCHAIN && BEGIN
             if (inCounter[servicePair] < index) {
-                (status, result) = callService(stringToAddress(destAddr), callFunc, args, false);
+                (status[0], results[0]) = callService(stringToAddress(destAddr), callFunc, args, false);
             }
             invokeIndexUpdate(srcFullID, dstFullID, index, 0);
-            if (status) {
+            if (status[0]) {
                 typ = 1;
             } else {
                 typ = 2;
@@ -264,7 +273,7 @@ contract Broker {
         } else {
             // INTERCHAIN && FAILURE || INTERCHAIN && ROLLBACK, only happened in relay mode
             if (inCounter[servicePair] >= index) {
-                (status, result) = callService(stringToAddress(destAddr), callFunc, args, true);
+                (status[0], results[0]) = callService(stringToAddress(destAddr), callFunc, args, true);
             }
             invokeIndexUpdate(srcFullID, dstFullID, index, 2);
             if (txStatus == 1) {
@@ -274,12 +283,78 @@ contract Broker {
             }
         }
 
-        receiptMessages[servicePair][index] = Receipt(isEncrypt, typ, result);
+
+        receiptMessages[servicePair][index] = Receipt(isEncrypt, typ, results, status);
 
         if (isEncrypt) {
-            emit throwReceiptEvent(index, dstFullID, srcFullID, typ, status, new bytes[](0), computeHash(result));
+            emit throwReceiptEvent(index, dstFullID, srcFullID, typ, new bytes[][](0), computeHash(results), status);
         } else {
-            emit throwReceiptEvent(index, dstFullID, srcFullID, typ, status, result, computeHash(result));
+            emit throwReceiptEvent(index, dstFullID, srcFullID, typ, results, computeHash(results), status);
+        }
+    }
+
+    // called on dest chain
+    function invokeMultiInterchain(
+        string memory srcFullID,
+    // 地址变为string格式，这样多签不会有问题，在验证多签之前使用checksum之前的合约地址
+        string memory destAddr,
+        uint64 index,
+        uint64 typ,
+        string memory callFunc,
+        bytes[][] memory args,
+        uint64 txStatus,
+        bytes[] memory signatures,
+        bool isEncrypt) payable public {
+        string memory dstFullID = genFullServiceID(destAddr);
+        string memory servicePair = genServicePair(srcFullID, dstFullID);
+        {
+            bool ok = checkMultiInterchainMultiSigns(srcFullID, dstFullID, index, typ, callFunc, args, txStatus, signatures);
+            if (!ok) {
+                invokeIndexUpdateWithError(srcFullID, dstFullID, index, txStatus, isEncrypt, "invalid multiInterchain-multi-signature", uint64(args.length));
+                return;
+            }
+
+            if (localWhiteList[stringToAddress(destAddr)] == false) {
+                invokeIndexUpdateWithError(srcFullID, dstFullID, index, txStatus, isEncrypt, "dest address is not in local white list", uint64(args.length));
+                return;
+            }
+        }
+
+        bytes[][] memory results = new bytes[][](args.length);
+        bool[] memory multiStatus = new bool[](args.length);
+        typ = 1;
+        if (txStatus == 0) {
+            // INTERCHAIN && BEGIN
+            if (inCounter[servicePair] < index) {
+                (multiStatus, results) = callMultiService(stringToAddress(destAddr), callFunc, args, false);
+                for (uint i = 0; i < multiStatus.length; i++){
+                    if(!multiStatus[i]){
+                        typ = 2;
+                        break;
+                    }
+                }
+            }
+            invokeIndexUpdate(srcFullID, dstFullID, index, 0);
+        } else {
+            // INTERCHAIN && FAILURE || INTERCHAIN && ROLLBACK, only happened in relay mode
+            if (inCounter[servicePair] >= index) {
+                (multiStatus, results) = callMultiService(stringToAddress(destAddr), callFunc, args, true);
+            }
+            invokeIndexUpdate(srcFullID, dstFullID, index, 2);
+            if (txStatus == 1) {
+                typ = 2;
+            } else {
+                typ = 3;
+            }
+        }
+
+
+        receiptMessages[servicePair][index] = Receipt(isEncrypt, typ, results, multiStatus);
+
+        if (isEncrypt) {
+            emit throwReceiptEvent(index, dstFullID, srcFullID, typ, new bytes[][](0), computeHash(results), multiStatus);
+        } else {
+            emit throwReceiptEvent(index, dstFullID, srcFullID, typ, results, computeHash(results), multiStatus);
         }
     }
 
@@ -298,12 +373,31 @@ contract Broker {
         return (status, result);
     }
 
-    function computeHash(bytes[] memory args) internal pure returns (bytes32) {
-        bytes memory packed;
-        for (uint i = 0; i < args.length; i++) {
-            packed = abi.encodePacked(packed, args[i]);
+
+    function callMultiService(address destAddr, string memory callFunc, bytes[][] memory args, bool isRollback) private returns (bool[] memory, bytes[][] memory) {
+        bool status = true;
+        bytes[][] memory Results;
+        bool[] memory MultiStatus;
+
+        if (keccak256(abi.encodePacked(callFunc)) != keccak256(abi.encodePacked(""))) {
+            (bool ok, bytes memory data) = address(destAddr).call(abi.encodeWithSignature(string(abi.encodePacked(callFunc, "(bytes[][],bool)")), args, isRollback));
+            status = ok;
+            if (status) {
+                (Results, MultiStatus) = abi.decode(data, (bytes[][],bool[]));
+            }
         }
 
+        return (MultiStatus, Results);
+    }
+
+    function computeHash(bytes[][] memory args) internal pure returns (bytes32) {
+        bytes memory packed;
+        for (uint i = 0; i < args.length; i++) {
+            bytes[] memory arg = args[i];
+            for (uint j = 0; j < arg.length; j++) {
+                packed = abi.encodePacked(packed, arg[j]);
+            }
+        }
         return keccak256(packed);
     }
 
@@ -313,7 +407,7 @@ contract Broker {
         string memory dstFullID,
         uint64 index,
         uint64 typ,
-        bytes[] memory result,
+        bytes[][] memory results,
         uint64 txStatus,
         bytes[] memory signatures) payable external {
         string memory srcFullID = genFullServiceID(srcAddr);
@@ -323,30 +417,31 @@ contract Broker {
         }
 
         invokeIndexUpdate(srcFullID, dstFullID, index, 1);
-
-        checkReceiptMultiSigns(srcFullID, dstFullID, index, typ, result, txStatus, signatures);
+        checkReceiptMultiSigns(srcFullID, dstFullID, index, typ, results, txStatus, signatures);
 
         string memory outServicePair = genServicePair(srcFullID, dstFullID);
         CallFunc memory invokeFunc = outMessages[outServicePair][index].callback;
-        bytes[] memory args = new bytes[](invokeFunc.args.length + result.length);
+        bytes[] memory args = new bytes[](invokeFunc.args.length);
 
         if (isRollback) {
             invokeFunc = outMessages[outServicePair][index].rollback;
             args = new bytes[](invokeFunc.args.length);
-        }
-
-        for (uint i = 0; i < invokeFunc.args.length; i++) {
-            args[i] = invokeFunc.args[i];
+            for (uint i = 0; i < invokeFunc.args.length; i++) {
+                args[i] = invokeFunc.args[i];
+            }
         }
 
         if (!isRollback) {
-            for (uint i = 0; i < result.length; i++) {
-                args[invokeFunc.args.length + i] = result[i];
+            args = new bytes[](invokeFunc.args.length + results[0].length);
+            for (uint i = 0; i < invokeFunc.args.length; i++) {
+                args[i] = invokeFunc.args[i];
+            }
+            for (uint i = 0; i < results[0].length; i++) {
+                args[invokeFunc.args.length + i] = results[0][i];
             }
         }
 
         if (keccak256(abi.encodePacked(invokeFunc.func)) != keccak256(abi.encodePacked(""))) {
-
             string memory method = string(abi.encodePacked(invokeFunc.func, "(bytes[])"));
             (bool ok,) = address(stringToAddress(srcAddr)).call(abi.encodeWithSignature(method, args));
             emit throwReceiptStatus(ok);
@@ -355,6 +450,71 @@ contract Broker {
 
         emit throwReceiptStatus(true);
     }
+
+    // called on src chain
+    function invokeMultiReceipt(
+        string memory srcAddr,
+        string memory dstFullID,
+        uint64 index,
+        uint64 typ,
+        bytes[][] memory results,
+        bool[] memory multiStatus,
+        uint64 txStatus,
+        bytes[] memory signatures) payable external {
+        string memory srcFullID = genFullServiceID(srcAddr);
+        bool isRollback = false;
+
+        if (txStatus != 0 && txStatus != 3) {
+            isRollback = true;
+        }
+        {
+            invokeIndexUpdate(srcFullID, dstFullID, index, 1);
+            checkReceiptMultiSigns(srcFullID, dstFullID, index, typ, results, txStatus, signatures);
+        }
+
+        string memory outServicePair = genServicePair(srcFullID, dstFullID);
+
+
+        if (isRollback) {
+            CallFunc memory invokeFunc = outMessages[outServicePair][index].rollback;
+            bytes[] memory args = new bytes[](invokeFunc.args.length);
+            for (uint i = 0; i < invokeFunc.args.length; i++) {
+                args[i] = invokeFunc.args[i];
+            }
+            if (keccak256(abi.encodePacked(invokeFunc.func)) != keccak256(abi.encodePacked(""))) {
+                (bool ok,) = address(stringToAddress(srcAddr)).call(abi.encodeWithSignature(string(abi.encodePacked(invokeFunc.func, "(bytes[],bool[])")), args, multiStatus));
+                if (!ok){
+                    emit throwReceiptStatus(false);
+                    return;
+                }
+            }
+        }
+
+        bool flag = false;
+        for (uint i = 0; i < multiStatus.length; i++) {
+            if (multiStatus[i] == true){
+                flag = true;
+                break;
+            }
+        }
+
+        if (flag) {
+            CallFunc memory invokeFunc = outMessages[outServicePair][index].callback;
+            bytes[] memory args = new bytes[](invokeFunc.args.length);
+            for (uint i = 0; i < invokeFunc.args.length; i++) {
+                args[i] = invokeFunc.args[i];
+            }
+            if (keccak256(abi.encodePacked(invokeFunc.func)) != keccak256(abi.encodePacked(""))) {
+                (bool ok,) = address(stringToAddress(srcAddr)).call(abi.encodeWithSignature(string(abi.encodePacked(invokeFunc.func, "(bytes[],bool[],bytes[][])")), args, multiStatus, results));
+                if (!ok) {
+                    emit throwReceiptStatus(false);
+                    return;
+                }
+            }
+        }
+        emit throwReceiptStatus(true);
+    }
+
 
     function invokeIndexUpdate(string memory srcFullID, string memory dstFullID, uint64 index, uint64 reqType) private {
         string memory servicePair = genServicePair(srcFullID, dstFullID);
@@ -367,7 +527,12 @@ contract Broker {
             markCallbackCounter(servicePair, index);
         } else if (reqType == 2) {
             // invoke dst rollback
-            require(dstRollbackCounter[servicePair] + 1 <= index);
+            // if one to multi, maybe invoke rollback for smaller index
+            if (dstRollbackCounter[servicePair] + 1 > index) {
+                Receipt memory receipt = receiptMessages[servicePair][index];
+                require(receipt.typ == 1);
+            }
+
             markDstRollbackCounter(servicePair, index);
             if (inCounter[servicePair] + 1 == index) {
                 markInCounter(servicePair);
@@ -375,29 +540,39 @@ contract Broker {
         }
     }
 
-    function invokeIndexUpdateWithError(string memory srcFullID, string memory dstFullID, uint64 index, uint64 txStatus, bool isEncrypt, string memory errorMsg) private {
+    function invokeIndexUpdateWithError(string memory srcFullID, string memory dstFullID, uint64 index, uint64 txStatus, bool isEncrypt, string memory errorMsg, uint64 resultsSize) private {
         string memory servicePair = genServicePair(srcFullID, dstFullID);
         uint64 typ;
+        bytes[][] memory results = new bytes[][](resultsSize);
         bytes[] memory result = new bytes[](1);
-        result[0] = bytes(errorMsg);
-        if(txStatus == 0) {
+        for (uint64 i = 0; i < resultsSize; i++) {
+            result[0] = bytes(errorMsg);
+            results[i] = result;
+        }
+
+        if (txStatus == 0) {
             invokeIndexUpdate(srcFullID, dstFullID, index, 0);
             typ = 2;
         } else {
             invokeIndexUpdate(srcFullID, dstFullID, index, 2);
-            if(txStatus == 1) {
+            if (txStatus == 1) {
                 typ = 2;
             } else {
                 typ = 3;
             }
         }
 
-        receiptMessages[servicePair][index] = Receipt(isEncrypt, typ, result);
+        bool[] memory multiStatus = new bool[](resultsSize);
+        for (uint64 i = 0; i < resultsSize; i++) {
+            multiStatus[i] = false;
+        }
+
+        receiptMessages[servicePair][index] = Receipt(isEncrypt, typ, results, multiStatus);
 
         if (isEncrypt) {
-            emit throwReceiptEvent(index, dstFullID, srcFullID, typ, false, new bytes[](0), computeHash(result));
+            emit throwReceiptEvent(index, dstFullID, srcFullID, typ, new bytes[][](0), computeHash(results), multiStatus);
         } else {
-            emit throwReceiptEvent(index, dstFullID, srcFullID, typ, false, result, computeHash(result));
+            emit throwReceiptEvent(index, dstFullID, srcFullID, typ, results, computeHash(results), multiStatus);
         }
     }
 
@@ -477,9 +652,9 @@ contract Broker {
         return (invoke.callFunc.func, invoke.callFunc.args, invoke.encrypt, invoke.group);
     }
 
-    function getReceiptMessage(string memory inServicePair, uint64 idx) public view returns (bytes[] memory, uint64, bool)  {
+    function getReceiptMessage(string memory inServicePair, uint64 idx) public view returns (bytes[][] memory, uint64, bool, bool[] memory)  {
         Receipt memory receipt = receiptMessages[inServicePair][idx];
-        return (receipt.result, receipt.typ, receipt.encrypt);
+        return (receipt.results, receipt.typ, receipt.encrypt, receipt.multiStatus);
     }
 
     function getInnerMeta() public view returns (string[] memory, uint64[] memory) {
@@ -528,16 +703,46 @@ contract Broker {
         string memory callFunc,
         bytes[] memory args,
         uint64 txStatus,
-        bytes[] memory multiSignatures) private returns(bool) {
+        bytes[] memory multiSignatures) private returns (bool) {
         bytes memory packed = abi.encodePacked(srcFullID, dstFullID, index, typ);
         bytes memory funcPacked = abi.encodePacked(callFunc);
+
+        funcPacked = abi.encodePacked(funcPacked, uint64(0));
         for (uint i = 0; i < args.length; i++) {
             funcPacked = abi.encodePacked(funcPacked, args[i]);
         }
         packed = abi.encodePacked(packed, keccak256(funcPacked), txStatus);
         bytes32 hash = keccak256(packed);
 
-        //require(checkMultiSigns(hash, multiSignatures), "invalid multi-signature");
+        return checkMultiSigns(hash, multiSignatures);
+    }
+
+    function checkMultiInterchainMultiSigns(string memory srcFullID,
+        string memory dstFullID,
+        uint64 index,
+        uint64 typ,
+        string memory callFunc,
+        bytes[][] memory args,
+        uint64 txStatus,
+        bytes[] memory multiSignatures) private returns (bool) {
+        bytes memory packed = abi.encodePacked(srcFullID, dstFullID, index, typ);
+        bytes memory funcPacked = abi.encodePacked(callFunc);
+        funcPacked = abi.encodePacked(funcPacked, uint64(1));
+        if (args.length == 0) {
+            funcPacked = abi.encodePacked(funcPacked, uint64(0));
+        } else {
+            funcPacked = abi.encodePacked(funcPacked, uint64(args[0].length));
+        }
+        for (uint i = 0; i < args.length; i++) {
+            bytes[] memory arg = args[i];
+            for (uint j = 0; j < arg.length; j++) {
+                funcPacked = abi.encodePacked(funcPacked, arg[j]);
+            }
+        }
+        packed = abi.encodePacked(packed, keccak256(funcPacked), txStatus);
+        bytes32 hash = keccak256(packed);
+
+        //        require(checkMultiSigns(hash, multiSignatures), "invalid MultiInterchain-multi-signature");
         return checkMultiSigns(hash, multiSignatures);
     }
 
@@ -545,7 +750,7 @@ contract Broker {
         string memory dstFullID,
         uint64 index,
         uint64 typ,
-        bytes[] memory result,
+        bytes[][] memory results,
         uint64 txStatus,
         bytes[] memory multiSignatures) private {
         bytes memory packed = abi.encodePacked(srcFullID, dstFullID, index, typ);
@@ -558,14 +763,17 @@ contract Broker {
                 data = abi.encodePacked(data, callFunc.args[i]);
             }
         } else {
-            for (uint i = 0; i < result.length; i++) {
-                data = abi.encodePacked(data, result[i]);
+            for (uint i = 0; i < results.length; i++) {
+                bytes[] memory result = results[i];
+                for (uint j = 0; j < result.length; i++) {
+                    data = abi.encodePacked(data, result[j]);
+                }
             }
         }
         packed = abi.encodePacked(packed, keccak256(data), txStatus);
         bytes32 hash = keccak256(packed);
 
-        require(checkMultiSigns(hash, multiSignatures), "invalid multi-signature");
+        require(checkMultiSigns(hash, multiSignatures), "invalid Receipt-multi-signature");
     }
 
     function checkMultiSigns(bytes32 hash, bytes[] memory multiSignatures) private returns (bool) {
@@ -741,7 +949,7 @@ contract Broker {
 
     function stringToAddress(string memory _address) internal pure returns (address) {
         bytes memory temp = bytes(_address);
-        if(temp.length != 42) {
+        if (temp.length != 42) {
             revert(string(abi.encodePacked(_address, " is not a valid address")));
         }
 
@@ -772,9 +980,9 @@ contract Broker {
         return address(result);
     }
 
-    function checkAppchainIdContains (string memory appchainId, string memory destFullService) private pure {
-        bytes memory whatBytes = bytes (appchainId);
-        bytes memory whereBytes = bytes (destFullService);
+    function checkAppchainIdContains(string memory appchainId, string memory destFullService) private pure {
+        bytes memory whatBytes = bytes(appchainId);
+        bytes memory whereBytes = bytes(destFullService);
 
         require(whereBytes.length >= whatBytes.length);
 
