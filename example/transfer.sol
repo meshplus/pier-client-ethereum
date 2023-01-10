@@ -57,31 +57,31 @@ contract Transfer {
         Broker(BrokerAddr).emitInterchainEvent(destChainServiceID, "interchainCharge", args, "", new bytes[](0), "interchainRollback", argsRb, false, new string[](0));
     }
 
-    // todo: not support in eth
-//    function multiTransfer(string memory destChainServiceID, string[] memory sender, string[] memory receiver, uint64[] memory amount) public {
-//        uint len = sender.length;
-//        require(len == receiver.length && len == amount.length);
-//        for (uint i = 0; i < len; i++) {
-//            require(accountM[sender[i]] >= amount[i]);
-//            accountM[sender[i]] -= amount[i];
-//        }
-//        bytes[] memory args = new bytes[](3 * len + 2);
-//        args[0] = abi.encodePacked(uint64(1));
-//        args[1] = abi.encodePacked(uint64(3));
-//        for (uint i = 0; i < len; i++) {
-//            args[i * 3 + 2] = abi.encodePacked(sender[i]);
-//            args[i * 3 + 3] = abi.encodePacked(receiver[i]);
-//            args[i * 3 + 4] = abi.encodePacked(amount[i]);
-//        }
-//        bytes[] memory argsRb = new bytes[](2 * len + 1);
-//        argsRb[0] = abi.encodePacked(uint64(2));
-//        for (uint i = 0; i < len; i++) {
-//            argsRb[i * 2 + 1] = abi.encodePacked(sender[i]);
-//            argsRb[i * 2 + 2] = abi.encodePacked(amount[i]);
-//        }
-//
-//        Broker(BrokerAddr).emitInterchainEvent(destChainServiceID, "interchainMultiCharge", args, "", new bytes[](0), "interchainMultiRollback", argsRb, false, new string[](0));
-//    }
+
+    function multiTransfer(string memory destChainServiceID, string[] memory sender, string[] memory receiver, uint64[] memory amount) public {
+        uint len = sender.length;
+        require(len == receiver.length && len == amount.length);
+        for (uint i = 0; i < len; i++) {
+            require(accountM[sender[i]] >= amount[i]);
+            accountM[sender[i]] -= amount[i];
+        }
+        bytes[] memory args = new bytes[](3 * len + 2);
+        args[0] = abi.encodePacked(uint64(1));
+        args[1] = abi.encodePacked(uint64(3));
+        for (uint i = 0; i < len; i++) {
+            args[i * 3 + 2] = abi.encodePacked(sender[i]);
+            args[i * 3 + 3] = abi.encodePacked(receiver[i]);
+            args[i * 3 + 4] = abi.encodePacked(amount[i]);
+        }
+        bytes[] memory argsRb = new bytes[](2 * len + 1);
+        argsRb[0] = abi.encodePacked(uint64(2));
+        for (uint i = 0; i < len; i++) {
+            argsRb[i * 2 + 1] = abi.encodePacked(sender[i]);
+            argsRb[i * 2 + 2] = abi.encodePacked(amount[i]);
+        }
+
+        Broker(BrokerAddr).emitInterchainEvent(destChainServiceID, "interchainMultiCharge", args, "", new bytes[](0), "interchainMultiRollback", argsRb, false, new string[](0));
+    }
 
     // contract for asset
     function transferOne2Multi(string[] memory destChainServiceIDs, string[] memory senders, string[] memory receivers, uint64[] memory amounts) public {
@@ -149,25 +149,24 @@ contract Transfer {
         accountM[sender] += amount;
     }
 
-    // todo: not support in eth
-//    function interchainMultiRollback(bytes[] memory args, bool[] memory multiStatus) public onlyBroker {
-//        uint64 arglenth = bytesToUint64(args[0]);
-//        string memory sender;
-//        uint64 amount;
-//        if (multiStatus.length == 0){
-//            multiStatus = new bool[]((args.length-1)/arglenth);
-//            for (uint i = 0; i < (args.length-1)/arglenth; i++){
-//                multiStatus[i] = false;
-//            }
-//        }
-//        for (uint i = 0; i < multiStatus.length; i++){
-//            if (!multiStatus[i]){
-//                sender = string(args[i * arglenth + 1]);
-//                amount = bytesToUint64(args[i * arglenth + 2]);
-//                accountM[sender] += amount;
-//            }
-//        }
-//    }
+    function interchainMultiRollback(bytes[] memory args, bool[] memory multiStatus) public onlyBroker {
+        uint64 arglenth = bytesToUint64(args[0]);
+        string memory sender;
+        uint64 amount;
+        if (multiStatus.length == 0){
+            multiStatus = new bool[]((args.length-1)/arglenth);
+            for (uint i = 0; i < (args.length-1)/arglenth; i++){
+                multiStatus[i] = false;
+            }
+        }
+        for (uint i = 0; i < multiStatus.length; i++){
+            if (!multiStatus[i]){
+                sender = string(args[i * arglenth + 1]);
+                amount = bytesToUint64(args[i * arglenth + 2]);
+                accountM[sender] += amount;
+            }
+        }
+    }
 
     function interchainCharge(bytes[] memory args, bool isRollback) public onlyBroker returns (bytes[] memory) {
         require(args.length == 3, "interchainCharge args' length is not correct, expect 3");
@@ -183,27 +182,26 @@ contract Transfer {
         return new bytes[](0);
     }
 
-    // todo: not support in eth
-//    function interchainMultiCharge(bytes[][] memory args, bool isRollback) public onlyBroker returns (bytes[][] memory results, bool[] memory multiStatus ) {
-//        for(uint i = 0; i< args.length; i++){
-//            require(args[i].length == 3, "interchainMultiCharge args' length is not correct, expect 3");
-//        }
-//
-//        bool[] memory multiStatus = new bool[](args.length);
-//
-//        for (uint i = 0; i < args.length; i++){
-//            string memory receiver = string(args[i][1]);
-//            uint64 amount = bytesToUint64(args[i][2]);
-//            if (!isRollback) {
-//                accountM[receiver] += amount;
-//            } else {
-//                accountM[receiver] -= amount;
-//            }
-//            multiStatus[i] = true;
-//        }
-//
-//        return (new bytes[][](0), multiStatus);
-//    }
+    function interchainMultiCharge(bytes[][] memory args, bool isRollback) public onlyBroker returns (bytes[][] memory results, bool[] memory multiStatus ) {
+        for(uint i = 0; i< args.length; i++){
+            require(args[i].length == 3, "interchainMultiCharge args' length is not correct, expect 3");
+        }
+
+        bool[] memory multiStatus = new bool[](args.length);
+
+        for (uint i = 0; i < args.length; i++){
+            string memory receiver = string(args[i][1]);
+            uint64 amount = bytesToUint64(args[i][2]);
+            if (!isRollback) {
+                accountM[receiver] += amount;
+            } else {
+                accountM[receiver] -= amount;
+            }
+            multiStatus[i] = true;
+        }
+
+        return (new bytes[][](0), multiStatus);
+    }
 
     function getBalance(string memory id) public view returns(uint64) {
         return accountM[id];
