@@ -62,7 +62,7 @@ func encodeDirectPayload(ev *BrokerDirectThrowInterchainEvent, encrypt bool) ([]
 
 func (c *Client) fillDirectInterchainEvent(ev *BrokerDirectThrowInterchainEvent) (*BrokerDirectThrowInterchainEvent, bool, error) {
 	if ev.Func == "" {
-		fun, args, encrypt, err := c.sessionDirect.GetOutMessage(pb.GenServicePair(ev.SrcFullID, ev.DstFullID), ev.Index)
+		fun, args, encrypt, _, err := c.sessionDirect.GetOutMessage(pb.GenServicePair(ev.SrcFullID, ev.DstFullID), ev.Index)
 		if err != nil {
 			return nil, false, err
 		}
@@ -89,7 +89,7 @@ func (c *Client) fillDirectInterchainEvent(ev *BrokerDirectThrowInterchainEvent)
 
 func (c *Client) fillDirectReceiptEvent(ev *BrokerDirectThrowReceiptEvent) (*BrokerDirectThrowReceiptEvent, bool, error) {
 	if ev.Results == nil {
-		results, typ, encrypt, multiStatus, err := c.session.GetReceiptMessage(pb.GenServicePair(ev.SrcFullID, ev.DstFullID), ev.Index)
+		results, typ, encrypt, multiStatus, err := c.sessionDirect.GetReceiptMessage(pb.GenServicePair(ev.SrcFullID, ev.DstFullID), ev.Index)
 		if err != nil {
 			return nil, false, err
 		}

@@ -421,7 +421,7 @@ func (c *Client) InvokeMultiInterchain(srcFullID string, index uint64, destAddr 
 	var txErr error
 	if err := retry.Retry(func(attempt uint) error {
 		if c.session == nil {
-			//tx, txErr = c.sessionDirect.InvokeInterchain(srcFullID, destAddr, index, reqType, callFunc, args, txStatus, multiSign, encrypt)
+			tx, txErr = c.sessionDirect.InvokeMultiInterchain(srcFullID, destAddr, index, reqType, callFunc, args, txStatus, multiSign, encrypt)
 		} else {
 			tx, txErr = c.session.InvokeMultiInterchain(srcFullID, destAddr, index, reqType, callFunc, args, txStatus, multiSign, encrypt)
 		}
@@ -474,7 +474,7 @@ func (c *Client) invokeReceipt(srcAddr string, dstFullID string, index uint64, r
 	var txErr error
 	if err := retry.Retry(func(attempt uint) error {
 		if c.session == nil {
-			//tx, txErr = c.sessionDirect.InvokeReceipt(srcAddr, dstFullID, index, reqType, results, txStatus, multiSign)
+			tx, txErr = c.sessionDirect.InvokeReceipt(srcAddr, dstFullID, index, reqType, results, txStatus, multiSign)
 		} else {
 			tx, txErr = c.session.InvokeReceipt(srcAddr, dstFullID, index, reqType, results, txStatus, multiSign)
 		}
@@ -515,7 +515,7 @@ func (c *Client) invokeReceipt(srcAddr string, dstFullID string, index uint64, r
 	return c.waitForConfirmed(tx.Hash()), nil
 }
 
-func (c *Client) InvokeMultiReceipt(srcAddr string, destFullID string, index uint64, reqType uint64, results [][][]byte, MultiStatus []bool, txStatus uint64, multiSign [][]byte) (*types.Receipt, error) {
+func (c *Client) InvokeMultiReceipt(srcAddr string, destFullID string, index uint64, reqType uint64, results [][][]byte, multiStatus []bool, txStatus uint64, multiSign [][]byte) (*types.Receipt, error) {
 	result := make([][]byte, len(results))
 	for i := 0; i < len(results); i++ {
 		result[i] = bytes.Join(results[i], []byte(","))
@@ -525,9 +525,9 @@ func (c *Client) InvokeMultiReceipt(srcAddr string, destFullID string, index uin
 	var txErr error
 	if err := retry.Retry(func(attempt uint) error {
 		if c.session == nil {
-			//tx, txErr = c.sessionDirect.InvokeReceipt(srcAddr, destFullID, index, reqType, results, txStatus, multiSign)
+			tx, txErr = c.sessionDirect.InvokeMultiReceipt(srcAddr, destFullID, index, reqType, results, multiStatus, txStatus, multiSign)
 		} else {
-			tx, txErr = c.session.InvokeMultiReceipt(srcAddr, destFullID, index, reqType, results, MultiStatus, txStatus, multiSign)
+			tx, txErr = c.session.InvokeMultiReceipt(srcAddr, destFullID, index, reqType, results, multiStatus, txStatus, multiSign)
 		}
 		if txErr != nil {
 			logger.Warn("Call InvokeReceipt failed",
@@ -604,7 +604,7 @@ func (c *Client) GetReceiptMessage(servicePair string, idx uint64) (*pb.IBTP, er
 	if err := retry.Retry(func(attempt uint) error {
 		var err error
 		if c.session == nil {
-			//data, typ, encrypt, err = c.sessionDirect.GetReceiptMessage(servicePair, idx)
+			data, typ, encrypt, multiStatus, err = c.sessionDirect.GetReceiptMessage(servicePair, idx)
 		} else {
 			data, typ, encrypt, multiStatus, err = c.session.GetReceiptMessage(servicePair, idx)
 		}

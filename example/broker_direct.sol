@@ -57,7 +57,7 @@ contract BrokerDirect {
         admins = _admins;
         adminThreshold = _adminThreshold;
         dataAddr = _dataAddr;
-        BrokerData(_dataAddr).register();
+        BrokerDirectData(_dataAddr).register();
     }
 
     // update admin list and adminThreshold
@@ -75,7 +75,7 @@ contract BrokerDirect {
         }
         delete localServices;
         Transaction(directTransactionAddr).initialize();
-        BrokerData(dataAddr).initialize();
+        BrokerDirectData(dataAddr).initialize();
     }
 
     // register transaction management contract address in direct mode
@@ -163,7 +163,7 @@ contract BrokerDirect {
     function getLocalServiceList() public view returns (string[] memory) {
         string[] memory fullServiceIDList = new string[](localServices.length);
         for (uint i = 0; i < localServices.length; i++) {
-            fullServiceIDList[i] = genFullServiceID(BrokerData(dataAddr).addressToString(localServices[i]));
+            fullServiceIDList[i] = genFullServiceID(BrokerDirectData(dataAddr).addressToString(localServices[i]));
         }
 
         return fullServiceIDList;
@@ -205,12 +205,12 @@ contract BrokerDirect {
         bytes[][] memory results = new bytes[][](1);
         if (txStatus == 0) {
             // INTERCHAIN && BEGIN
-            checkService(srcFullID, BrokerData(dataAddr).stringToAddress(destAddr));
+            checkService(srcFullID, BrokerDirectData(dataAddr).stringToAddress(destAddr));
 
-            if (BrokerData(dataAddr).getInCounter(servicePair) < index) {
-                (status[0], results[0]) = callService(BrokerData(dataAddr).stringToAddress(destAddr), callFunc, args, false);
+            if (BrokerDirectData(dataAddr).getInCounter(servicePair) < index) {
+                (status[0], results[0]) = callService(BrokerDirectData(dataAddr).stringToAddress(destAddr), callFunc, args, false);
             }
-            require(BrokerData(dataAddr).invokeIndexUpdate(srcFullID, dstFullID, index, 0));
+            require(BrokerDirectData(dataAddr).invokeIndexUpdate(srcFullID, dstFullID, index, 0));
             if (status[0]) {
                 typ = 1;
             } else {
@@ -218,16 +218,16 @@ contract BrokerDirect {
             }
         } else {
             // INTERCHAIN && FAILURE || INTERCHAIN && ROLLBACK
-            if (BrokerData(dataAddr).getInCounter(servicePair) >= index) {
-                checkService(srcFullID, BrokerData(dataAddr).stringToAddress(destAddr));
-                (status[0], results[0]) = callService(BrokerData(dataAddr).stringToAddress(destAddr), callFunc, args, true);
+            if (BrokerDirectData(dataAddr).getInCounter(servicePair) >= index) {
+                checkService(srcFullID, BrokerDirectData(dataAddr).stringToAddress(destAddr));
+                (status[0], results[0]) = callService(BrokerDirectData(dataAddr).stringToAddress(destAddr), callFunc, args, true);
             }
-            require(BrokerData(dataAddr).invokeIndexUpdate(srcFullID, dstFullID, index, 2));
+            require(BrokerDirectData(dataAddr).invokeIndexUpdate(srcFullID, dstFullID, index, 2));
             // ROLLBACK -> ROLLBACK_END
             typ = 4;
         }
 
-        BrokerData(dataAddr).setReceiptMessage(servicePair, index, isEncrypt, typ, results, status);
+        BrokerDirectData(dataAddr).setReceiptMessage(servicePair, index, isEncrypt, typ, results, status);
 
         if (isEncrypt) {
             emit throwReceiptEvent(index, dstFullID, srcFullID, typ, new bytes[][](0), computeHash(results), status);
@@ -255,11 +255,11 @@ contract BrokerDirect {
         bool[] memory multiStatus = new bool[](args.length);
         typ = 1;
         if (txStatus == 0) {
-            checkService(srcFullID, BrokerData(dataAddr).stringToAddress(destAddr));
+            checkService(srcFullID, BrokerDirectData(dataAddr).stringToAddress(destAddr));
 
             // INTERCHAIN && BEGIN
-            if (BrokerData(dataAddr).getInCounter(servicePair) < index) {
-                (multiStatus, results) = callMultiService(BrokerData(dataAddr).stringToAddress(destAddr), callFunc, args, false);
+            if (BrokerDirectData(dataAddr).getInCounter(servicePair) < index) {
+                (multiStatus, results) = callMultiService(BrokerDirectData(dataAddr).stringToAddress(destAddr), callFunc, args, false);
                 for (uint i = 0; i < multiStatus.length; i++){
                     if(!multiStatus[i]){
                         typ = 2;
@@ -267,19 +267,19 @@ contract BrokerDirect {
                     }
                 }
             }
-            require(BrokerData(dataAddr).invokeIndexUpdate(srcFullID, dstFullID, index, 0));
+            require(BrokerDirectData(dataAddr).invokeIndexUpdate(srcFullID, dstFullID, index, 0));
         } else {
             // INTERCHAIN && FAILURE || INTERCHAIN && ROLLBACK, only happened in relay mode
-            if (BrokerData(dataAddr).getInCounter(servicePair) >= index) {
-                checkService(srcFullID, BrokerData(dataAddr).stringToAddress(destAddr));
-                (multiStatus, results) = callMultiService(BrokerData(dataAddr).stringToAddress(destAddr), callFunc, args, true);
+            if (BrokerDirectData(dataAddr).getInCounter(servicePair) >= index) {
+                checkService(srcFullID, BrokerDirectData(dataAddr).stringToAddress(destAddr));
+                (multiStatus, results) = callMultiService(BrokerDirectData(dataAddr).stringToAddress(destAddr), callFunc, args, true);
             }
-            require(BrokerData(dataAddr).invokeIndexUpdate(srcFullID, dstFullID, index, 2));
+            require(BrokerDirectData(dataAddr).invokeIndexUpdate(srcFullID, dstFullID, index, 2));
             // ROLLBACK -> ROLLBACK_END
             typ = 4;
         }
 
-        BrokerData(dataAddr).setReceiptMessage(servicePair, index, isEncrypt, typ, results, multiStatus);
+        BrokerDirectData(dataAddr).setReceiptMessage(servicePair, index, isEncrypt, typ, results, multiStatus);
 
         if (isEncrypt) {
             emit throwReceiptEvent(index, dstFullID, srcFullID, typ, new bytes[][](0), computeHash(results), multiStatus);
@@ -317,7 +317,7 @@ contract BrokerDirect {
             return;
         }
 
-        require(BrokerData(dataAddr).invokeIndexUpdate(srcFullID, dstFullID, index, 1));
+        require(BrokerDirectData(dataAddr).invokeIndexUpdate(srcFullID, dstFullID, index, 1));
 
         string memory outServicePair = genServicePair(srcFullID, dstFullID);
 
@@ -329,10 +329,10 @@ contract BrokerDirect {
         bytes[] memory callArgs;
         bytes[] memory args;
         if (isRollback) {
-            (callFunc, callArgs) = BrokerData(dataAddr).getRollbackMessage(servicePair, index);
+            (callFunc, callArgs) = BrokerDirectData(dataAddr).getRollbackMessage(servicePair, index);
             args = new bytes[](callArgs.length);
         } else {
-            (callFunc, callArgs) = BrokerData(dataAddr).getCallbackMessage(servicePair, index);
+            (callFunc, callArgs) = BrokerDirectData(dataAddr).getCallbackMessage(servicePair, index);
             args = new bytes[](callArgs.length + results[0].length);
         }
 
@@ -348,7 +348,7 @@ contract BrokerDirect {
 
         if (keccak256(abi.encodePacked(callFunc)) != keccak256(abi.encodePacked(""))) {
             string memory method = string(abi.encodePacked(callFunc, "(bytes[])"));
-            (bool ok,) = address(BrokerData(dataAddr).stringToAddress(srcAddr)).call(abi.encodeWithSignature(method, args));
+            (bool ok,) = address(BrokerDirectData(dataAddr).stringToAddress(srcAddr)).call(abi.encodeWithSignature(method, args));
             emit throwReceiptStatus(ok);
             return;
         }
@@ -385,7 +385,7 @@ contract BrokerDirect {
             return;
         }
 
-        require(BrokerData(dataAddr).invokeIndexUpdate(srcFullID, dstFullID, index, 1));
+        require(BrokerDirectData(dataAddr).invokeIndexUpdate(srcFullID, dstFullID, index, 1));
 
         string memory outServicePair = genServicePair(srcFullID, dstFullID);
 
@@ -397,13 +397,13 @@ contract BrokerDirect {
         bytes[] memory callArgs;
         bytes[] memory args;
         if (isRollback) {
-            (callFunc, callArgs) = BrokerData(dataAddr).getRollbackMessage(servicePair, index);
+            (callFunc, callArgs) = BrokerDirectData(dataAddr).getRollbackMessage(servicePair, index);
             args = new bytes[](callArgs.length);
             for (uint i = 0; i < callArgs.length; i++) {
                 args[i] = callArgs[i];
             }
             if (keccak256(abi.encodePacked(callFunc)) != keccak256(abi.encodePacked(""))) {
-                (bool ok,) = address(BrokerData(dataAddr).stringToAddress(srcAddr)).call(abi.encodeWithSignature(string(abi.encodePacked(callFunc, "(bytes[],bool[])")), args, multiStatus));
+                (bool ok,) = address(BrokerDirectData(dataAddr).stringToAddress(srcAddr)).call(abi.encodeWithSignature(string(abi.encodePacked(callFunc, "(bytes[],bool[])")), args, multiStatus));
                 if (!ok){
                     emit throwReceiptStatus(false);
                     return;
@@ -420,13 +420,13 @@ contract BrokerDirect {
         }
 
         if (flag) {
-            (callFunc, callArgs) = BrokerData(dataAddr).getCallbackMessage(servicePair, index);
+            (callFunc, callArgs) = BrokerDirectData(dataAddr).getCallbackMessage(servicePair, index);
             args = new bytes[](callArgs.length);
             for (uint i = 0; i < callArgs.length; i++) {
                 args[i] = callArgs[i];
             }
             if (keccak256(abi.encodePacked(callFunc)) != keccak256(abi.encodePacked(""))) {
-                (bool ok,) = address(BrokerData(dataAddr).stringToAddress(srcAddr)).call(abi.encodeWithSignature(string(abi.encodePacked(callFunc, "(bytes[],bool[],bytes[][])")), args, multiStatus, results));
+                (bool ok,) = address(BrokerDirectData(dataAddr).stringToAddress(srcAddr)).call(abi.encodeWithSignature(string(abi.encodePacked(callFunc, "(bytes[],bool[],bytes[][])")), args, multiStatus, results));
                 if (!ok) {
                     emit throwReceiptStatus(false);
                     return;
@@ -447,8 +447,8 @@ contract BrokerDirect {
         bool isEncrypt,
         string[] memory group)
     public onlyWhiteList {
-        require(!BrokerData(dataAddr).checkAppchainIdContains(appchainID, destFullServiceID), "dest service is belong to current broker!");
-        string memory curFullID = genFullServiceID(BrokerData(dataAddr).addressToString(msg.sender));
+        require(!BrokerDirectData(dataAddr).checkAppchainIdContains(appchainID, destFullServiceID), "dest service is belong to current broker!");
+        string memory curFullID = genFullServiceID(BrokerDirectData(dataAddr).addressToString(msg.sender));
         string memory outServicePair = genServicePair(curFullID, destFullServiceID);
 
         {
@@ -475,9 +475,9 @@ contract BrokerDirect {
 
 
         // Record the order of interchain contract which has been started.
-        uint64 currentOutCounter = BrokerData(dataAddr).markOutCounter(outServicePair);
+        uint64 currentOutCounter = BrokerDirectData(dataAddr).markOutCounter(outServicePair);
 
-        BrokerData(dataAddr).setOutMessage(outServicePair, isEncrypt, group, funcCall, args, funcCb, argsCb, funcRb, argsRb);
+        BrokerDirectData(dataAddr).setOutMessage(outServicePair, isEncrypt, group, funcCall, args, funcCb, argsCb, funcRb, argsRb);
 
         bytes32 hash = computeInvokeHash(funcCall, args);
 
@@ -503,27 +503,27 @@ contract BrokerDirect {
 
     // The helper functions that help plugin query.
     function getOuterMeta() public view returns (string[] memory, uint64[] memory) {
-        return BrokerData(dataAddr).getOuterMeta();
+        return BrokerDirectData(dataAddr).getOuterMeta();
     }
 
     function getOutMessage(string memory outServicePair, uint64 idx) public view returns (string memory, bytes[] memory, bool, string[] memory) {
-        return BrokerData(dataAddr).getOutMessage(outServicePair, idx);
+        return BrokerDirectData(dataAddr).getOutMessage(outServicePair, idx);
     }
 
     function getReceiptMessage(string memory inServicePair, uint64 idx) public view returns (bytes[][] memory, uint64, bool, bool[] memory)  {
-        return BrokerData(dataAddr).getReceiptMessage(inServicePair, idx);
+        return BrokerDirectData(dataAddr).getReceiptMessage(inServicePair, idx);
     }
 
     function getInnerMeta() public view returns (string[] memory, uint64[] memory) {
-        return BrokerData(dataAddr).getInnerMeta();
+        return BrokerDirectData(dataAddr).getInnerMeta();
     }
 
     function getCallbackMeta() public view returns (string[] memory, uint64[] memory) {
-        return BrokerData(dataAddr).getCallbackMeta();
+        return BrokerDirectData(dataAddr).getCallbackMeta();
     }
 
     function getDstRollbackMeta() public view returns (string[] memory, uint64[] memory) {
-        return BrokerData(dataAddr).getDstRollbackMeta();
+        return BrokerDirectData(dataAddr).getDstRollbackMeta();
     }
 
     // get transaction start timestamp and transaction status in direct mode
@@ -639,7 +639,7 @@ abstract contract Transaction {
     function getStartTimestamp(string memory IBTPid) public view virtual returns (uint);
 }
 
-abstract contract BrokerData {
+abstract contract BrokerDirectData {
     function register() public virtual;
 
     function initialize() public virtual;
