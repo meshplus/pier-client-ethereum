@@ -323,6 +323,7 @@ func (c *Client) SubmitIBTPBatch(from []string, index []uint64, serviceID []stri
 	)
 	for idx, ct := range content {
 		callFunc = append(callFunc, ct.Func)
+		ct.Args = ct.Args[1:]
 		args = append(args, ct.Args)
 		typ = append(typ, uint64(ibtpType[idx]))
 		txStatus = append(txStatus, uint64(proof[idx].TxStatus))
