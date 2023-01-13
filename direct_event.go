@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/meshplus/bitxhub-model/pb"
@@ -34,7 +35,7 @@ func (c *Client) Convert2DirectReceipt(ev *BrokerDirectThrowReceiptEvent) (*pb.I
 		return nil, err
 	}
 
-	return generateReceipt(fullEv.SrcFullID, fullEv.DstFullID, fullEv.Index, fullEv.Result, fullEv.Typ, encrypt)
+	return generateReceipt(fullEv.SrcFullID, fullEv.DstFullID, fullEv.Index, fullEv.Results, fullEv.Typ, encrypt, fullEv.MultiStatus)
 }
 
 func encodeDirectPayload(ev *BrokerDirectThrowInterchainEvent, encrypt bool) ([]byte, error) {
@@ -61,7 +62,7 @@ func encodeDirectPayload(ev *BrokerDirectThrowInterchainEvent, encrypt bool) ([]
 
 func (c *Client) fillDirectInterchainEvent(ev *BrokerDirectThrowInterchainEvent) (*BrokerDirectThrowInterchainEvent, bool, error) {
 	if ev.Func == "" {
-		fun, args, encrypt, err := c.sessionDirect.GetOutMessage(pb.GenServicePair(ev.SrcFullID, ev.DstFullID), ev.Index)
+		fun, args, encrypt, _, err := c.sessionDirect.GetOutMessage(pb.GenServicePair(ev.SrcFullID, ev.DstFullID), ev.Index)
 		if err != nil {
 			return nil, false, err
 		}
@@ -87,19 +88,22 @@ func (c *Client) fillDirectInterchainEvent(ev *BrokerDirectThrowInterchainEvent)
 }
 
 func (c *Client) fillDirectReceiptEvent(ev *BrokerDirectThrowReceiptEvent) (*BrokerDirectThrowReceiptEvent, bool, error) {
-	if ev.Result == nil {
-		result, typ, encrypt, err := c.sessionDirect.GetReceiptMessage(pb.GenServicePair(ev.SrcFullID, ev.DstFullID), ev.Index)
+	if ev.Results == nil {
+		results, typ, encrypt, multiStatus, err := c.sessionDirect.GetReceiptMessage(pb.GenServicePair(ev.SrcFullID, ev.DstFullID), ev.Index)
 		if err != nil {
 			return nil, false, err
 		}
-		ev.Result = result
+		ev.Results = results
 		ev.Typ = typ
+		ev.MultiStatus = multiStatus
 
 		emptyHash := common.Hash{}
 		if bytes.Equal(ev.Hash[:], emptyHash[:]) {
 			var packed []byte
-			for _, ele := range result {
-				packed = append(packed, ele...)
+			for _, ele := range results {
+				for _, result := range ele {
+					packed = append(packed, result...)
+				}
 			}
 			ev.Hash = common.BytesToHash(crypto.Keccak256(packed))
 		}

@@ -27,8 +27,11 @@ func CheckReceiptOffChain(ibtp *pb.IBTP, result *pb.Result) (bool, error) {
 	if err := content.Unmarshal(pd.Content); err != nil {
 		return false, err
 	}
-
-	if strings.EqualFold(content.Func, GET_FUNC) && len(result.Data) == 3 && strings.EqualFold(string(result.Data[1]), "1") {
+	var results [][][]byte
+	for _, s := range result.Data {
+		results = append(results, s.Data)
+	}
+	if strings.EqualFold(content.Func, GET_FUNC) && len(result.Data) == 3 && strings.EqualFold(string(results[0][1]), "1") {
 		return true, nil
 	}
 

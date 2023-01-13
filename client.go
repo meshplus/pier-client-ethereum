@@ -3,13 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
-	"github.com/meshplus/bitxhub-core/agency"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Rican7/retry"
@@ -22,6 +23,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/hashicorp/go-hclog"
+	"github.com/meshplus/bitxhub-core/agency"
 	"github.com/meshplus/bitxhub-model/pb"
 )
 
@@ -37,6 +39,7 @@ type Client struct {
 	sessionDirect *BrokerDirectSession
 	eventC        chan *pb.IBTP
 	reqCh         chan *pb.GetDataRequest
+	lock          sync.Mutex
 }
 
 var (
@@ -49,13 +52,11 @@ var (
 	EtherType = "ethereum"
 )
 
-const InvokeInterchain = "invokeInterchain"
-
 func (c *Client) GetUpdateMeta() chan *pb.UpdateMeta {
 	panic("implement me")
 }
 
-func (c *Client) Initialize(configPath string, extra []byte, mode string) error {
+func (c *Client) Initialize(configPath string, _ []byte, mode string) error {
 	cfg, err := UnmarshalConfig(configPath)
 	if err != nil {
 		return fmt.Errorf("unmarshal config for plugin :%w", err)
@@ -140,7 +141,6 @@ func (c *Client) Initialize(configPath string, extra []byte, mode string) error 
 	c.ethClient = etherCli
 	c.abi = ab
 	c.ctx, c.cancel = context.WithCancel(context.Background())
-
 	return nil
 }
 
@@ -196,17 +196,48 @@ func (c *Client) SubmitIBTP(from string, index uint64, serviceID string, ibtpTyp
 	//	ret.Status = false
 	//	return ret, nil
 	//}
-	receipt, err := c.invokeInterchain(from, index, serviceID, uint64(ibtpType), content.Func, content.Args, uint64(proof.TxStatus), proof.MultiSign, isEncrypted)
-	if err != nil {
-		ret.Status = false
-		ret.Message = err.Error()
-		return ret, nil
-	}
+	typ := int64(binary.BigEndian.Uint64(content.Args[0]))
+	if typ == int64(pb.IBTP_Multi) {
+		lenArgs := len(content.Args) - 2
+		num := int(binary.BigEndian.Uint64(content.Args[1])) //convert byte to Uint64
+		if lenArgs%num != 0 {
+			return ret, fmt.Errorf("format error for IBTP carrying multiple transactions")
+		}
 
-	if receipt.Status != types.ReceiptStatusSuccessful {
-		ret.Status = false
-		ret.Message = fmt.Sprintf("SubmitIBTP tx execution failed")
-		return ret, nil
+		var Args [][][]byte
+		for i := 2; i < len(content.Args); {
+			Args = append(Args, content.Args[i:i+num])
+			i += num
+		}
+		receipt, err := c.InvokeMultiInterchain(from, index, serviceID, uint64(ibtpType), content.Func, Args, uint64(proof.TxStatus), proof.MultiSign, isEncrypted)
+		if err != nil {
+			ret.Status = false
+			ret.Message = err.Error()
+			logger.Warn("SubmitIBTP:", ret.Status, ret.Message)
+			return ret, nil
+		}
+		if receipt.Status != types.ReceiptStatusSuccessful {
+			ret.Status = false
+			ret.Message = fmt.Sprintf("SubmitIBTP tx execution failed")
+			return ret, nil
+		}
+		logger.Info("SubmitIBTP:", ret.Status, ret.Message, "txHash: ", receipt.TxHash)
+	} else {
+		content.Args = content.Args[1:]
+		receipt, err := c.invokeInterchain(from, index, serviceID, uint64(ibtpType), content.Func, content.Args, uint64(proof.TxStatus), proof.MultiSign, isEncrypted)
+		if err != nil {
+			ret.Status = false
+			ret.Message = err.Error()
+			logger.Warn("SubmitIBTP:", ret.Status, ret.Message)
+			return ret, nil
+		}
+
+		if receipt.Status != types.ReceiptStatusSuccessful {
+			ret.Status = false
+			ret.Message = fmt.Sprintf("SubmitIBTP tx execution failed")
+			return ret, nil
+		}
+		logger.Info("SubmitIBTP:", ret.Status, ret.Message, "txHash: ", receipt.TxHash)
 	}
 
 	return ret, nil
@@ -232,22 +263,48 @@ func (c *Client) SubmitReceipt(to string, index uint64, serviceID string, ibtpTy
 		}
 		if needOffChain {
 			// get data from dstChain
-			req := constructReq(index, from, to, result.Data[0])
+			var results [][][]byte
+			for _, s := range result.Data {
+				results = append(results, s.Data)
+			}
+			req := constructReq(index, from, to, results[0][0])
 			c.reqCh <- req
 		}
 	}
 
 	ret := &pb.SubmitIBTPResponse{Status: true}
-	receipt, err := c.invokeReceipt(serviceID, to, index, uint64(ibtpType), result.Data, uint64(proof.TxStatus), proof.MultiSign)
-	if err != nil {
-		ret.Status = false
-		ret.Message = err.Error()
-		return ret, nil
+	var results [][][]byte
+	for _, s := range result.Data {
+		results = append(results, s.Data)
 	}
 
-	if receipt.Status != types.ReceiptStatusSuccessful {
-		ret.Status = false
-		ret.Message = fmt.Sprintf("SubmitReceipt tx execution failed")
+	// if src chain need rollback, the length of results is 0
+	if len(result.MultiStatus) > 1 || (len(result.MultiStatus) == 0 && proof.TxStatus != pb.TransactionStatus_BEGIN) {
+		receipt, err := c.InvokeMultiReceipt(serviceID, to, index, uint64(ibtpType), results, result.MultiStatus, uint64(proof.TxStatus), proof.MultiSign)
+		if err != nil {
+			ret.Status = false
+			ret.Message = err.Error()
+			return ret, nil
+		}
+
+		if receipt.Status != types.ReceiptStatusSuccessful {
+			ret.Status = false
+			ret.Message = fmt.Sprintf("SubmitReceipt tx execution failed")
+		}
+
+	} else {
+		// The case where a rollback is required in the source chain of a single transaction
+		receipt, err := c.invokeReceipt(serviceID, to, index, uint64(ibtpType), results, uint64(proof.TxStatus), proof.MultiSign)
+		if err != nil {
+			ret.Status = false
+			ret.Message = err.Error()
+			return ret, nil
+		}
+
+		if receipt.Status != types.ReceiptStatusSuccessful {
+			ret.Status = false
+			ret.Message = fmt.Sprintf("SubmitReceipt tx execution failed")
+		}
 	}
 
 	return ret, nil
@@ -266,6 +323,7 @@ func (c *Client) SubmitIBTPBatch(from []string, index []uint64, serviceID []stri
 	)
 	for idx, ct := range content {
 		callFunc = append(callFunc, ct.Func)
+		ct.Args = ct.Args[1:]
 		args = append(args, ct.Args)
 		typ = append(typ, uint64(ibtpType[idx]))
 		txStatus = append(txStatus, uint64(proof[idx].TxStatus))
@@ -301,11 +359,12 @@ func (c *Client) SubmitIBTPBatch(from []string, index []uint64, serviceID []stri
 	return ret, nil
 }
 
-func (c *Client) SubmitReceiptBatch(to []string, index []uint64, serviceID []string, ibtpType []pb.IBTP_Type, result []*pb.Result, proof []*pb.BxhProof) (*pb.SubmitIBTPResponse, error) {
+func (c *Client) SubmitReceiptBatch(_ []string, _ []uint64, _ []string, _ []pb.IBTP_Type, _ []*pb.Result, _ []*pb.BxhProof) (*pb.SubmitIBTPResponse, error) {
 	panic("implement me")
 }
 
 func (c *Client) invokeInterchain(srcFullID string, index uint64, destAddr string, reqType uint64, callFunc string, args [][]byte, txStatus uint64, multiSign [][]byte, encrypt bool) (*types.Receipt, error) {
+	c.lock.Lock()
 	var tx *types.Transaction
 	var txErr error
 	if err := retry.Retry(func(attempt uint) error {
@@ -345,22 +404,80 @@ func (c *Client) invokeInterchain(srcFullID string, index uint64, destAddr strin
 	}, strategy.Wait(2*time.Second)); err != nil {
 		logger.Error("Can't invoke contract", "error", err)
 	}
+	c.lock.Unlock()
 
 	if txErr != nil {
 		return nil, txErr
 	}
-
 	return c.waitForConfirmed(tx.Hash()), nil
 }
 
-func (c *Client) invokeReceipt(srcAddr string, dstFullID string, index uint64, reqType uint64, result [][]byte, txStatus uint64, multiSign [][]byte) (*types.Receipt, error) {
+func (c *Client) InvokeMultiInterchain(srcFullID string, index uint64, destAddr string, reqType uint64, callFunc string, args [][][]byte, txStatus uint64, multiSign [][]byte, encrypt bool) (*types.Receipt, error) {
+	arg := make([][]byte, len(args))
+	for i := 0; i < len(args); i++ {
+		arg[i] = bytes.Join(args[i], []byte(","))
+	}
+	c.lock.Lock()
 	var tx *types.Transaction
 	var txErr error
 	if err := retry.Retry(func(attempt uint) error {
 		if c.session == nil {
-			tx, txErr = c.sessionDirect.InvokeReceipt(srcAddr, dstFullID, index, reqType, result, txStatus, multiSign)
+			tx, txErr = c.sessionDirect.InvokeMultiInterchain(srcFullID, destAddr, index, reqType, callFunc, args, txStatus, multiSign, encrypt)
 		} else {
-			tx, txErr = c.session.InvokeReceipt(srcAddr, dstFullID, index, reqType, result, txStatus, multiSign)
+			tx, txErr = c.session.InvokeMultiInterchain(srcFullID, destAddr, index, reqType, callFunc, args, txStatus, multiSign, encrypt)
+		}
+		if txErr != nil {
+			logger.Warn("Call InvokeMultiInterchain failed",
+				"srcFullID", srcFullID,
+				"destAddr", destAddr,
+				"index", fmt.Sprintf("%d", index),
+				"reqType", strconv.Itoa(int(reqType)),
+				"callFunc", callFunc,
+				"args", string(bytes.Join(arg, []byte(","))),
+				"txStatus", strconv.Itoa(int(txStatus)),
+				"multiSign size", strconv.Itoa(len(multiSign)),
+				"encrypt", strconv.FormatBool(encrypt),
+				"error", txErr.Error(),
+			)
+
+			for i, Arg := range arg {
+				logger.Warn("args", strconv.Itoa(i), hexutil.Encode(Arg))
+			}
+
+			for i, sign := range multiSign {
+				logger.Warn("multiSign", strconv.Itoa(i), hexutil.Encode(sign))
+			}
+
+			if strings.Contains(txErr.Error(), "execution reverted") {
+				return nil
+			}
+		}
+
+		return txErr
+	}, strategy.Wait(2*time.Second)); err != nil {
+		logger.Error("Can't invoke contract", "error", err)
+	}
+	c.lock.Unlock()
+
+	if txErr != nil {
+		return nil, txErr
+	}
+	return c.waitForConfirmed(tx.Hash()), nil
+}
+
+func (c *Client) invokeReceipt(srcAddr string, dstFullID string, index uint64, reqType uint64, results [][][]byte, txStatus uint64, multiSign [][]byte) (*types.Receipt, error) {
+	result := make([][]byte, len(results))
+	for i := 0; i < len(results); i++ {
+		result[i] = bytes.Join(results[i], []byte(","))
+	}
+	c.lock.Lock()
+	var tx *types.Transaction
+	var txErr error
+	if err := retry.Retry(func(attempt uint) error {
+		if c.session == nil {
+			tx, txErr = c.sessionDirect.InvokeReceipt(srcAddr, dstFullID, index, reqType, results, txStatus, multiSign)
+		} else {
+			tx, txErr = c.session.InvokeReceipt(srcAddr, dstFullID, index, reqType, results, txStatus, multiSign)
 		}
 		if txErr != nil {
 			logger.Warn("Call InvokeReceipt failed",
@@ -391,7 +508,58 @@ func (c *Client) invokeReceipt(srcAddr string, dstFullID string, index uint64, r
 	}, strategy.Wait(2*time.Second)); err != nil {
 		logger.Error("Can't invoke contract", "error", err)
 	}
+	c.lock.Unlock()
+	if txErr != nil {
+		return nil, txErr
+	}
 
+	return c.waitForConfirmed(tx.Hash()), nil
+}
+
+func (c *Client) InvokeMultiReceipt(srcAddr string, destFullID string, index uint64, reqType uint64, results [][][]byte, multiStatus []bool, txStatus uint64, multiSign [][]byte) (*types.Receipt, error) {
+	result := make([][]byte, len(results))
+	for i := 0; i < len(results); i++ {
+		result[i] = bytes.Join(results[i], []byte(","))
+	}
+	c.lock.Lock()
+	var tx *types.Transaction
+	var txErr error
+	if err := retry.Retry(func(attempt uint) error {
+		if c.session == nil {
+			tx, txErr = c.sessionDirect.InvokeMultiReceipt(srcAddr, destFullID, index, reqType, results, multiStatus, txStatus, multiSign)
+		} else {
+			tx, txErr = c.session.InvokeMultiReceipt(srcAddr, destFullID, index, reqType, results, multiStatus, txStatus, multiSign)
+		}
+		if txErr != nil {
+			logger.Warn("Call InvokeReceipt failed",
+				"srcAddr", srcAddr,
+				"dstFullID", destFullID,
+				"index", fmt.Sprintf("%d", index),
+				"reqType", strconv.Itoa(int(reqType)),
+				"result", string(bytes.Join(result, []byte(","))),
+				"txStatus", strconv.Itoa(int(txStatus)),
+				"multiSign size", strconv.Itoa(len(multiSign)),
+				"error", txErr.Error(),
+			)
+
+			for i, arg := range result {
+				logger.Warn("result", strconv.Itoa(i), hexutil.Encode(arg))
+			}
+
+			for i, sign := range multiSign {
+				logger.Warn("multiSign", strconv.Itoa(i), hexutil.Encode(sign))
+			}
+
+			if strings.Contains(txErr.Error(), "execution reverted") {
+				return nil
+			}
+		}
+
+		return txErr
+	}, strategy.Wait(2*time.Second)); err != nil {
+		logger.Error("Can't invoke contract", "error", err)
+	}
+	c.lock.Unlock()
 	if txErr != nil {
 		return nil, txErr
 	}
@@ -425,20 +593,21 @@ func (c *Client) GetOutMessage(servicePair string, idx uint64) (*pb.IBTP, error)
 	}
 }
 
-// GetInMessage gets the execution results from contract by from-index key
+// GetReceiptMessage gets the execution results from contract by from-index key
 func (c *Client) GetReceiptMessage(servicePair string, idx uint64) (*pb.IBTP, error) {
 	var (
-		data    [][]byte
-		typ     uint64
-		encrypt bool
+		data        [][][]byte
+		typ         uint64
+		encrypt     bool
+		multiStatus []bool
 	)
 
 	if err := retry.Retry(func(attempt uint) error {
 		var err error
 		if c.session == nil {
-			data, typ, encrypt, err = c.sessionDirect.GetReceiptMessage(servicePair, idx)
+			data, typ, encrypt, multiStatus, err = c.sessionDirect.GetReceiptMessage(servicePair, idx)
 		} else {
-			data, typ, encrypt, err = c.session.GetReceiptMessage(servicePair, idx)
+			data, typ, encrypt, multiStatus, err = c.session.GetReceiptMessage(servicePair, idx)
 		}
 		if err != nil {
 			logger.Error("get receipt message", "servicePair", servicePair, "err", err.Error())
@@ -454,7 +623,7 @@ func (c *Client) GetReceiptMessage(servicePair string, idx uint64) (*pb.IBTP, er
 		return nil, err
 	}
 
-	return generateReceipt(srcServiceID, dstServiceID, idx, data, typ, encrypt)
+	return generateReceipt(srcServiceID, dstServiceID, idx, data, typ, encrypt, multiStatus)
 }
 
 // GetInMeta queries contract about how many interchain txs have been

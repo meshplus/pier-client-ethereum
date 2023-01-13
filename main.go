@@ -1,11 +1,14 @@
 package main
 
 import (
-	"github.com/gobuffalo/packr/v2"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
+
+	"github.com/gobuffalo/packr/v2"
 
 	"github.com/fatih/color"
 	"github.com/gobuffalo/packd"
@@ -65,15 +68,43 @@ var startCMD = cli.Command{
 	},
 }
 
+var (
+	// CurrentCommit current git commit hash
+	CurrentCommit = ""
+	// CurrentBranch current git branch
+	CurrentBranch = ""
+	// CurrentVersion current project version
+	CurrentVersion = "0.0.0"
+	// BuildDate compile date
+	BuildDate = ""
+	// GoVersion system go version
+	GoVersion = runtime.Version()
+	// Platform info
+	Platform = fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH)
+)
+
+var versionCMD = cli.Command{
+	Name:  "version",
+	Usage: "eth-client version",
+	Action: func(ctx *cli.Context) error {
+		printVersion()
+		return nil
+	},
+}
+
 func main() {
 	app := cli.NewApp()
 	app.Name = "ethereum-plugin"
 	app.Usage = "Manipulate the ethereum blockchain"
 	app.Compiled = time.Now()
+	cli.VersionPrinter = func(c *cli.Context) {
+		printVersion()
+	}
 
 	app.Commands = []cli.Command{
 		initCMD,
 		startCMD,
+		versionCMD,
 	}
 
 	err := app.Run(os.Args)
@@ -81,4 +112,12 @@ func main() {
 		color.Red(err.Error())
 		os.Exit(-1)
 	}
+}
+
+func printVersion() {
+	fmt.Printf("eth-client version: %s-%s-%s\n", CurrentVersion, CurrentBranch, CurrentCommit)
+	fmt.Printf("App build date: %s\n", BuildDate)
+	fmt.Printf("System version: %s\n", Platform)
+	fmt.Printf("Golang version: %s\n", GoVersion)
+	fmt.Println()
 }
