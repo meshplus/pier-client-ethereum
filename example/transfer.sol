@@ -57,7 +57,6 @@ contract Transfer {
         Broker(BrokerAddr).emitInterchainEvent(destChainServiceID, "interchainCharge", args, "", new bytes[](0), "interchainRollback", argsRb, false, new string[](0));
     }
 
-
     function multiTransfer(string memory destChainServiceID, string[] memory sender, string[] memory receiver, uint64[] memory amount) public {
         uint len = sender.length;
         require(len == receiver.length && len == amount.length);
@@ -91,11 +90,15 @@ contract Transfer {
 
         string[] memory brokerOuts;
         uint64[] memory outCounters;
+        string[] memory brokerCallbacks;
+        uint64[] memory callbackCounters;
         string[] memory group;
         (brokerOuts, outCounters) = Broker(BrokerAddr).getOuterMeta();
+
+        (brokerCallbacks, callbackCounters) = Broker(BrokerAddr).getCallbackMeta();
         for (uint i = 0; i < len; i++)
         {
-            group = fillMultiGroup(destChainServiceIDs, brokerOuts, outCounters);
+            group = fillMultiGroup(destChainServiceIDs, brokerOuts, outCounters, brokerCallbacks, callbackCounters);
         }
 
         for (uint i = 0; i < len; i++)
@@ -116,29 +119,47 @@ contract Transfer {
         }
     }
 
-    function fillMultiGroup(string[] memory destChainServiceIDs, string[] memory brokerOuts, uint64[] memory outCounters) private view returns (string[] memory) {
+    function fillMultiGroup(string[] memory destChainServiceIDs, string[] memory brokerOuts, uint64[] memory outCounters, string[] memory brokerCallbacks, uint64[] memory callbackCounters) private view returns (string[] memory) {
         string[] memory multiGroup = new string[](destChainServiceIDs.length);
         for (uint i = 0; i < destChainServiceIDs.length; i++)
         {
             uint index = brokerOuts.length;
+            string memory outServicePair;
             for (uint j = 0; j < brokerOuts.length; j++)
             {
-                string memory outServicePair = genServicePair(curFullID, destChainServiceIDs[i]);
+                outServicePair = genServicePair(curFullID, destChainServiceIDs[i]);
                 if (keccak256(abi.encodePacked(brokerOuts[j])) == keccak256(abi.encodePacked(outServicePair))) {
                     index = j;
                 }
             }
 
-            uint groupValue;
+            uint64 groupValue;
             // not found in out meta, indicate index equal 1
             if (index == brokerOuts.length) {
                 groupValue = 1;
             } else {
                 groupValue = outCounters[index]+1;
             }
+            checkIndex(outServicePair, groupValue-1, brokerCallbacks, callbackCounters);
             multiGroup[i] = genMultiGroup(destChainServiceIDs[i], uint2str(groupValue));
         }
         return multiGroup;
+    }
+
+    function checkIndex(string memory servicePair, uint64 outCounter, string[] memory brokerCallbacks, uint64[] memory callbackCounters) private pure {
+        uint index = brokerCallbacks.length;
+        for (uint i = 0; i < brokerCallbacks.length; i++)
+        {
+            if (keccak256(abi.encodePacked(brokerCallbacks[i])) == keccak256(abi.encodePacked(servicePair))) {
+                index = i;
+            }
+        }
+        if (brokerCallbacks.length == 0) {
+            require(outCounter == 0,  "the servicePair does not exist in callbackCounters");
+        } else {
+            require(index != brokerCallbacks.length, "the servicePair does not exist in callbackCounters");
+            require(callbackCounters[index] == outCounter, "the callbackCounter does not equal to outCounter");
+        }
     }
 
 
@@ -386,12 +407,13 @@ abstract contract Broker {
         string memory funcRb,
         bytes[] memory argsRb,
         bool isEncrypt,
-        string[] memory group
-    ) public virtual;
+        string[] memory group) public virtual;
 
     function register(bool ordered) public virtual;
 
     function getOuterMeta() public virtual view returns (string[] memory, uint64[] memory);
+
+    function getCallbackMeta() public virtual view returns (string[] memory, uint64[] memory);
 
     function getChainID() public virtual view returns (string memory, string memory);
 }
