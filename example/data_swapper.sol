@@ -27,13 +27,14 @@ contract DataSwapper {
     }
 
     function get(string memory destChainServiceID, string memory key) public {
-        bytes[] memory args = new bytes[](1);
-        args[0] = abi.encodePacked(key);
+        bytes[] memory args = new bytes[](2);
+        args[0] = abi.encodePacked(uint64(0));
+        args[1] = abi.encodePacked(key);
 
         bytes[] memory argsCb = new bytes[](1);
         argsCb[0] = abi.encodePacked(key);
 
-        Broker(BrokerAddr).emitInterchainEvent(destChainServiceID, "interchainGet", args, "interchainSet", argsCb, "", new bytes[](0), false);
+        Broker(BrokerAddr).emitInterchainEvent(destChainServiceID, "interchainGet", args, "interchainSet", argsCb, "", new bytes[](0), false, new string[](0));
     }
 
     function set(string memory key, string memory value) public {
@@ -67,7 +68,8 @@ abstract contract Broker {
         bytes[] memory argsCb,
         string memory funcRb,
         bytes[] memory argsRb,
-        bool isEncrypt) public virtual;
+        bool isEncrypt,
+        string[] memory group) public virtual;
 
     function register(bool ordered) public virtual;
 }
