@@ -1,8 +1,9 @@
 package main
 
 import (
-	"github.com/meshplus/bitxhub-model/pb"
 	"strings"
+
+	"github.com/meshplus/bitxhub-model/pb"
 )
 
 const (

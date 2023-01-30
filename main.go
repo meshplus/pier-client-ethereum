@@ -8,10 +8,9 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/gobuffalo/packr/v2"
-
 	"github.com/fatih/color"
 	"github.com/gobuffalo/packd"
+	"github.com/gobuffalo/packr/v2"
 	"github.com/hashicorp/go-plugin"
 	"github.com/meshplus/pier/pkg/plugins"
 	"github.com/urfave/cli"

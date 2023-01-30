@@ -33,6 +33,14 @@ help: Makefile
 	@echo "Choose a command run:"
 	@sed -n 's/^##//p' $< | column -t -s ':' | sed -e 's/^/ /'
 
+prepare:
+	cd scripts && bash prepare.sh
+
+## make test-coverage: Test project with cover
+test-coverage:
+	@go test -short -coverprofile cover.out -covermode=atomic ${TEST_PKGS}
+	@cat cover.out >> coverage.txt
+
 ## make eth: build ethereum client plugin
 eth:
 	@packr2
