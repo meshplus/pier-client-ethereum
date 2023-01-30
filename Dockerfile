@@ -32,4 +32,4 @@ COPY --from=0 /lib/libwasmer.so /lib/libwasmer.so
 ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/lib
 
 EXPOSE 44544 44555
-ENTRYPOINT ["/bin/sh", "-c","pier start"]
+ENTRYPOINT ["pier","start"]
