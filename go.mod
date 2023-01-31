@@ -5,15 +5,15 @@ go 1.13
 require (
 	github.com/Rican7/retry v0.1.0
 	github.com/StackExchange/wmi v1.2.1 // indirect
-	github.com/ethereum/go-ethereum v1.10.7
+	github.com/ethereum/go-ethereum v1.10.8
 	github.com/fatih/color v1.9.0
 	github.com/gobuffalo/packd v1.0.1
 	github.com/gobuffalo/packr/v2 v2.8.3
 	github.com/hashicorp/go-hclog v0.14.1
 	github.com/hashicorp/go-plugin v1.3.0
-	github.com/meshplus/bitxhub-core v1.3.1-0.20221216095518-2b59e2647227
-	github.com/meshplus/bitxhub-model v1.2.1-0.20230103095329-f8638b97544e
-	github.com/meshplus/pier v1.24.1-0.20230106080320-d18aef37f37a
+	github.com/meshplus/bitxhub-core v1.28.0
+	github.com/meshplus/bitxhub-model v1.28.0
+	github.com/meshplus/pier v1.24.1-0.20230119083935-a568b0398d3c
 	github.com/spf13/viper v1.8.1
 	github.com/urfave/cli v1.22.1
 )

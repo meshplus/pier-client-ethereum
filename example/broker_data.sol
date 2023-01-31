@@ -380,7 +380,7 @@ contract BrokerData {
         } else {
             for (uint i = 0; i < results.length; i++) {
                 bytes[] memory result = results[i];
-                for (uint j = 0; j < result.length; i++) {
+                for (uint j = 0; j < result.length; j++) {
                     data = abi.encodePacked(data, result[j]);
                 }
             }
