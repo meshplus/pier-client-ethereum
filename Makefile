@@ -35,7 +35,6 @@ help: Makefile
 
 ## make eth: build ethereum client plugin
 eth:
-	@packr2
 	mkdir -p build
 	$(GO) build -ldflags '${GOLDFLAGS}' *.go
 	@mv broker build/eth-client
