@@ -14,16 +14,15 @@ else
   APP_VERSION = dev
 endif
 
-# build with verison infos
+# build with version infos
 VERSION_DIR = github.com/meshplus/${APP_NAME}/main
 GOLDFLAGS += -X "main.BuildDate=${BUILD_DATE}"
 GOLDFLAGS += -X "main.CurrentCommit=${GIT_COMMIT}"
 GOLDFLAGS += -X "main.CurrentBranch=${GIT_BRANCH}"
 GOLDFLAGS += -X "main.CurrentVersion=${APP_VERSION}"
 
-ifeq (docker,$(firstword $(MAKECMDGOALS)))
-  DOCKER_ARGS := $(wordlist 2,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
-  $(eval $(DOCKER_ARGS):;@:)
+ifndef (${TAG})
+  TAG = latest
 endif
 
 GREEN=\033[0;32m
@@ -33,6 +32,14 @@ help: Makefile
 	@echo "Choose a command run:"
 	@sed -n 's/^##//p' $< | column -t -s ':' | sed -e 's/^/ /'
 
+prepare:
+	cd scripts && bash prepare.sh
+
+## make test-coverage: Test project with cover
+test-coverage: prepare
+	@go test -short -coverprofile cover.out -covermode=atomic ${TEST_PKGS}
+	@cat cover.out >> coverage.txt
+
 ## make eth: build ethereum client plugin
 eth:
 	@packr2
@@ -41,11 +48,10 @@ eth:
 	@mv broker build/eth-client
 	@printf "${GREEN}Build eth-client successfully!${NC}\n"
 
-docker:
-	mkdir -p build
-	cd build && rm -rf pier && git clone https://github.com/meshplus/pier.git && cd pier && git checkout $(DOCKER_ARGS)
-	cd ${CURRENT_PATH}
-	docker build -t meshplus/pier-ethereum .
+## make build-docker: docker build the project
+build-docker:
+	docker build -t meshplus/pier-ethereum:${TAG} .
+	@printf "${GREEN}Build images meshplus/pier-ethereum:${TAG} successfully!${NC}\n".
 
 release-binary:
 	mkdir -p build
