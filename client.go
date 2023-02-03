@@ -52,6 +52,11 @@ var (
 	EtherType = "ethereum"
 )
 
+const (
+	SubmitIBTPErr    = "SubmitIBTP tx execution failed"
+	SubmitReceiptErr = "SubmitReceipt tx execution failed"
+)
+
 func (c *Client) GetUpdateMeta() chan *pb.UpdateMeta {
 	panic("implement me")
 }
@@ -218,7 +223,7 @@ func (c *Client) SubmitIBTP(from string, index uint64, serviceID string, ibtpTyp
 		}
 		if receipt.Status != types.ReceiptStatusSuccessful {
 			ret.Status = false
-			ret.Message = fmt.Sprintf("SubmitIBTP tx execution failed")
+			ret.Message = SubmitIBTPErr
 			return ret, nil
 		}
 		logger.Info("SubmitIBTP:", ret.Status, ret.Message, "txHash: ", receipt.TxHash)
@@ -234,7 +239,7 @@ func (c *Client) SubmitIBTP(from string, index uint64, serviceID string, ibtpTyp
 
 		if receipt.Status != types.ReceiptStatusSuccessful {
 			ret.Status = false
-			ret.Message = fmt.Sprintf("SubmitIBTP tx execution failed")
+			ret.Message = SubmitIBTPErr
 			return ret, nil
 		}
 		logger.Info("SubmitIBTP:", ret.Status, ret.Message, "txHash: ", receipt.TxHash)
@@ -289,7 +294,7 @@ func (c *Client) SubmitReceipt(to string, index uint64, serviceID string, ibtpTy
 
 		if receipt.Status != types.ReceiptStatusSuccessful {
 			ret.Status = false
-			ret.Message = fmt.Sprintf("SubmitReceipt tx execution failed")
+			ret.Message = SubmitReceiptErr
 		}
 
 	} else {
@@ -303,7 +308,7 @@ func (c *Client) SubmitReceipt(to string, index uint64, serviceID string, ibtpTy
 
 		if receipt.Status != types.ReceiptStatusSuccessful {
 			ret.Status = false
-			ret.Message = fmt.Sprintf("SubmitReceipt tx execution failed")
+			ret.Message = SubmitReceiptErr
 		}
 	}
 
@@ -352,7 +357,7 @@ func (c *Client) SubmitIBTPBatch(from []string, index []uint64, serviceID []stri
 
 	if receipt.Status != types.ReceiptStatusSuccessful {
 		ret.Status = false
-		ret.Message = fmt.Sprintf("SubmitIBTP tx execution failed")
+		ret.Message = SubmitIBTPErr
 		return ret, nil
 	}
 
@@ -363,6 +368,7 @@ func (c *Client) SubmitReceiptBatch(_ []string, _ []uint64, _ []string, _ []pb.I
 	panic("implement me")
 }
 
+//nolint:dupl
 func (c *Client) invokeInterchain(srcFullID string, index uint64, destAddr string, reqType uint64, callFunc string, args [][]byte, txStatus uint64, multiSign [][]byte, encrypt bool) (*types.Receipt, error) {
 	c.lock.Lock()
 	var tx *types.Transaction
@@ -412,6 +418,7 @@ func (c *Client) invokeInterchain(srcFullID string, index uint64, destAddr strin
 	return c.waitForConfirmed(tx.Hash()), nil
 }
 
+//nolint:dupl
 func (c *Client) InvokeMultiInterchain(srcFullID string, index uint64, destAddr string, reqType uint64, callFunc string, args [][][]byte, txStatus uint64, multiSign [][]byte, encrypt bool) (*types.Receipt, error) {
 	arg := make([][]byte, len(args))
 	for i := 0; i < len(args); i++ {
@@ -807,7 +814,10 @@ func (c *Client) SubmitOffChainData(response *pb.GetDataResponse) error {
 			if err != nil {
 				return err
 			}
-			mf.Write(data)
+			_, err = mf.Write(data)
+			if err != nil {
+				return err
+			}
 		}
 		return nil
 	}

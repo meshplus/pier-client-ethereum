@@ -71,9 +71,10 @@ func (c *Client) Convert2Receipt(ev *BrokerThrowReceiptEvent) (*pb.IBTP, error) 
 
 func encodePayload(ev *BrokerThrowInterchainEvent, encrypt bool) ([]byte, error) {
 	var args [][]byte
-	for _, arg := range ev.Args {
-		args = append(args, []byte(arg))
-	}
+	args = append(args, ev.Args...)
+	//for _, arg := range ev.Args {
+	//	args = append(args, arg)
+	//}
 	content := &pb.Content{
 		Func: ev.Func,
 		Args: args,
@@ -107,7 +108,7 @@ func (c *Client) fillInterchainEvent(ev *BrokerThrowInterchainEvent) (*BrokerThr
 			var data []byte
 			data = append(data, []byte(fun)...)
 			for _, arg := range args {
-				data = append(data, []byte(arg)...)
+				data = append(data, arg...)
 			}
 
 			ev.Hash = common.BytesToHash(crypto.Keccak256(data))
