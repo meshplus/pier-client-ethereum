@@ -48,10 +48,10 @@ func constructReq(index uint64, from, to string, url []byte) *pb.GetDataRequest 
 	}
 }
 
-func constructResp(req *pb.GetDataRequest) *pb.GetDataResponse {
-	return &pb.GetDataResponse{
-		Index: req.Index,
-		From:  req.From,
-		To:    req.To,
-	}
-}
+//func constructResp(req *pb.GetDataRequest) *pb.GetDataResponse {
+//	return &pb.GetDataResponse{
+//		Index: req.Index,
+//		From:  req.From,
+//		To:    req.To,
+//	}
+//}

@@ -5,14 +5,14 @@ import (
 	"github.com/meshplus/bitxhub-model/pb"
 )
 
-func (c *Client) generateCallback(original *pb.IBTP, data [][][]byte, typ uint64, multiStatus []bool) (result *pb.IBTP, err error) {
-	payload := &pb.Payload{}
-	if err := payload.Unmarshal(original.Payload); err != nil {
-		return nil, err
-	}
-
-	return generateReceipt(original.From, original.To, original.Index, data, typ, payload.Encrypted, multiStatus)
-}
+//func (c *Client) generateCallback(original *pb.IBTP, data [][][]byte, typ uint64, multiStatus []bool) (result *pb.IBTP, err error) {
+//	payload := &pb.Payload{}
+//	if err := payload.Unmarshal(original.Payload); err != nil {
+//		return nil, err
+//	}
+//
+//	return generateReceipt(original.From, original.To, original.Index, data, typ, payload.Encrypted, multiStatus)
+//}
 
 func generateReceipt(from, to string, idx uint64, data [][][]byte, typ uint64, encrypt bool, multiStatus []bool) (*pb.IBTP, error) {
 	//result := &pb.Result{Data: data}
@@ -57,6 +57,6 @@ func generateReceipt(from, to string, idx uint64, data [][][]byte, typ uint64, e
 }
 
 // TODO
-func unpackToBytesArray(data []byte) ([][]byte, error) {
-	return nil, nil
-}
+//func unpackToBytesArray(data []byte) ([][]byte, error) {
+//	return nil, nil
+//}
