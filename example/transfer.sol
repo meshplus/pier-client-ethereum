@@ -9,6 +9,10 @@ contract Transfer {
     string bitxhubID;
     string appchainID;
     string curFullID;
+    // the length of a single arg in args, length is 3
+    uint64 argLength;
+    // the length of a single argRb in argsRb, length is 2
+    uint64 argRbLength;
 
     // AccessControl
     modifier onlyBroker {
@@ -21,6 +25,8 @@ contract Transfer {
         Broker(BrokerAddr).register(_ordered);
         (bitxhubID, appchainID) = Broker(BrokerAddr).getChainID();
         curFullID = genFullServiceID(addressToString(getAddress()));
+        argLength = uint64(3);
+        argRbLength = uint64(2);
     }
 
     function getCurFullID() public view returns (string memory) {
@@ -41,13 +47,12 @@ contract Transfer {
         require(accountM[sender] >= amount);
         accountM[sender] -= amount;
 
-        bytes[] memory args = new bytes[](4);
-        args[0] = abi.encodePacked(uint64(0));
-        args[1] = abi.encodePacked(sender);
-        args[2] = abi.encodePacked(receiver);
-        args[3] = abi.encodePacked(amount);
+        bytes[] memory args = new bytes[](argLength);
+        args[0] = abi.encodePacked(sender);
+        args[1] = abi.encodePacked(receiver);
+        args[2] = abi.encodePacked(amount);
 
-        bytes[] memory argsRb = new bytes[](2);
+        bytes[] memory argsRb = new bytes[](argRbLength);
         argsRb[0] = abi.encodePacked(sender);
         argsRb[1] = abi.encodePacked(amount);
         string[] memory func = new string[](3);
@@ -57,7 +62,6 @@ contract Transfer {
         Broker(BrokerAddr).emitInterchainEvent(destChainServiceID, "interchainCharge", args, "", new bytes[](0), "interchainRollback", argsRb, false, new string[](0));
     }
 
-
     function multiTransfer(string memory destChainServiceID, string[] memory sender, string[] memory receiver, uint64[] memory amount) public {
         uint len = sender.length;
         require(len == receiver.length && len == amount.length);
@@ -65,23 +69,22 @@ contract Transfer {
             require(accountM[sender[i]] >= amount[i]);
             accountM[sender[i]] -= amount[i];
         }
-        bytes[] memory args = new bytes[](3 * len + 2);
-        args[0] = abi.encodePacked(uint64(1));
-        args[1] = abi.encodePacked(uint64(3));
+        bytes[] memory args = new bytes[](argLength * len);
         for (uint i = 0; i < len; i++) {
-            args[i * 3 + 2] = abi.encodePacked(sender[i]);
-            args[i * 3 + 3] = abi.encodePacked(receiver[i]);
-            args[i * 3 + 4] = abi.encodePacked(amount[i]);
+            //  write transaction to args
+            args[i * argLength] = abi.encodePacked(sender[i]);
+            args[i * argLength + 1] = abi.encodePacked(receiver[i]);
+            args[i * argLength + 2] = abi.encodePacked(amount[i]);
         }
-        bytes[] memory argsRb = new bytes[](2 * len + 1);
-        argsRb[0] = abi.encodePacked(uint64(2));
+        bytes[] memory argsRb = new bytes[](argRbLength * len);
         for (uint i = 0; i < len; i++) {
-            argsRb[i * 2 + 1] = abi.encodePacked(sender[i]);
-            argsRb[i * 2 + 2] = abi.encodePacked(amount[i]);
+            argsRb[i * argRbLength] = abi.encodePacked(sender[i]);
+            argsRb[i * argRbLength + 1] = abi.encodePacked(amount[i]);
         }
 
-        Broker(BrokerAddr).emitInterchainEvent(destChainServiceID, "interchainMultiCharge", args, "", new bytes[](0), "interchainMultiRollback", argsRb, false, new string[](0));
+        Broker(BrokerAddr).emitInterchainEvent(destChainServiceID, "interchainCharge", args, "", new bytes[](0), "interchainRollback", argsRb, false, new string[](0));
     }
+
 
     // contract for asset
     function transferOne2Multi(string[] memory destChainServiceIDs, string[] memory senders, string[] memory receivers, uint64[] memory amounts) public {
@@ -103,13 +106,12 @@ contract Transfer {
             require(accountM[senders[i]] >= amounts[i]);
             accountM[senders[i]] -= amounts[i];
 
-            bytes[] memory args = new bytes[](4);
-            args[0] = abi.encodePacked(uint64(0));
-            args[1] = abi.encodePacked(senders[i]);
-            args[2] =abi.encodePacked(receivers[i]);
-            args[3] = abi.encodePacked(amounts[i]);
+            bytes[] memory args = new bytes[](argLength);
+            args[0] = abi.encodePacked(senders[i]);
+            args[1] =abi.encodePacked(receivers[i]);
+            args[2] = abi.encodePacked(amounts[i]);
 
-            bytes[] memory argsRb = new bytes[](2);
+            bytes[] memory argsRb = new bytes[](argRbLength);
             argsRb[0] = abi.encodePacked(senders[i]);
             argsRb[1] = abi.encodePacked(amounts[i]);
             Broker(BrokerAddr).emitInterchainEvent(destChainServiceIDs[i], "interchainCharge", args, "", new bytes[](0), "interchainRollback", argsRb, false, group);
@@ -142,56 +144,39 @@ contract Transfer {
     }
 
 
-    function interchainRollback(bytes[] memory args) public onlyBroker {
-        require(args.length == 2, "interchainRollback args' length is not correct, expect 2");
-        string memory sender = string(args[0]);
-        uint64 amount = bytesToUint64(args[1]);
-        accountM[sender] += amount;
-    }
 
-    function interchainMultiRollback(bytes[] memory args, bool[] memory multiStatus) public onlyBroker {
-        uint64 arglenth = bytesToUint64(args[0]);
+    function interchainRollback(bytes[] memory args, bool[] memory multiStatus) public onlyBroker {
+        require(args.length % argRbLength == 0);
+
         string memory sender;
         uint64 amount;
+        // Number of transactions
+        uint64 TxNumber = uint64(args.length / argRbLength);
         if (multiStatus.length == 0){
-            multiStatus = new bool[]((args.length-1)/arglenth);
-            for (uint i = 0; i < (args.length-1)/arglenth; i++){
+            multiStatus = new bool[](TxNumber);
+            for (uint i = 0; i < TxNumber; i++){
                 multiStatus[i] = false;
             }
         }
-        for (uint i = 0; i < multiStatus.length; i++){
+        for (uint i = 0; i < TxNumber; i++){
             if (!multiStatus[i]){
-                sender = string(args[i * arglenth + 1]);
-                amount = bytesToUint64(args[i * arglenth + 2]);
+                sender = string(args[i * argRbLength]);
+                amount = bytesToUint64(args[i * argRbLength + 1]);
                 accountM[sender] += amount;
             }
         }
     }
 
-    function interchainCharge(bytes[] memory args, bool isRollback) public onlyBroker returns (bytes[] memory) {
-        require(args.length == 3, "interchainCharge args' length is not correct, expect 3");
-        string memory receiver = string(args[1]);
-        uint64 amount = bytesToUint64(args[2]);
 
-        if (!isRollback) {
-            accountM[receiver] += amount;
-        } else {
-            accountM[receiver] -= amount;
-        }
+    function interchainCharge(bytes[] memory args, bool isRollback) public onlyBroker returns (bytes[][] memory results, bool[] memory multiStatus ) {
+        require(args.length % argLength == 0, "interchainCharge arg' length is not correct, expect 3");
 
-        return new bytes[](0);
-    }
+        uint64 TxNumber = uint64(args.length / argLength);
+        bool[] memory multiStatus = new bool[](TxNumber);
 
-    function interchainMultiCharge(bytes[][] memory args, bool isRollback) public onlyBroker returns (bytes[][] memory results, bool[] memory multiStatus ) {
-        for(uint i = 0; i< args.length; i++){
-            require(args[i].length == 3, "interchainMultiCharge args' length is not correct, expect 3");
-        }
-
-        bool[] memory multiStatus = new bool[](args.length);
-
-        for (uint i = 0; i < args.length; i++){
-            string memory receiver = string(args[i][1]);
-            uint64 amount = bytesToUint64(args[i][2]);
+        for (uint i = 0; i < TxNumber; i++){
+            string memory receiver = string(args[i * argLength + 1]);
+            uint64 amount = bytesToUint64(args[i * argLength + 2]);
             if (!isRollback) {
                 accountM[receiver] += amount;
             } else {
@@ -202,6 +187,7 @@ contract Transfer {
 
         return (new bytes[][](0), multiStatus);
     }
+
 
     function getBalance(string memory id) public view returns(uint64) {
         return accountM[id];
@@ -386,8 +372,7 @@ abstract contract Broker {
         string memory funcRb,
         bytes[] memory argsRb,
         bool isEncrypt,
-        string[] memory group
-    ) public virtual;
+        string[] memory group) public virtual;
 
     function register(bool ordered) public virtual;
 
