@@ -37,8 +37,8 @@ help: Makefile
 eth:
 	@packr2
 	mkdir -p build
-	$(GO) build -ldflags '${GOLDFLAGS}' *.go
-	@mv broker build/eth-client
+	$(GO) build -o eth-client -ldflags '${GOLDFLAGS}' *.go
+	@mv eth-client build/eth-client
 	@printf "${GREEN}Build eth-client successfully!${NC}\n"
 
 docker:
