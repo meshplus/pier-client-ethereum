@@ -2,29 +2,14 @@ pragma solidity >=0.6.9 <=0.7.6;
 pragma experimental ABIEncoderV2;
 
 contract BrokerDirect {
-    struct Proposal {
-        uint64 approve;
-        uint64 reject;
-        address[] votedAdmins;
-        bool ordered;
-        bool exist;
-    }
-
-    // Only the contract in the whitelist can invoke the Broker for interchain operations.
-    mapping(address => bool) localWhiteList;
-    address[] localServices;
-    mapping(address => Proposal) localServiceProposal;
-    address[] proposalList;
-    mapping(address => bool) serviceOrdered;
-
     // transaction management contract in direct mode
     address directTransactionAddr;
     address dataAddr;
 
     string bitxhubID;
     string appchainID;
-    address[] public admins;
-    uint64 public adminThreshold;
+    address[] admins;
+    uint64 adminThreshold;
 
     event throwInterchainEvent(uint64 index, string dstFullID, string srcFullID, string func, bytes[] args, bytes32 hash, string[] group);
     event throwReceiptEvent(uint64 index, string dstFullID, string srcFullID, uint64 typ, bytes[][] results, bytes32 hash, bool[] multiStatus);
@@ -32,7 +17,7 @@ contract BrokerDirect {
 
     // Authority control. Contracts need to be registered.
     modifier onlyWhiteList {
-        require(localWhiteList[msg.sender] == true, "Invoker are not in white list");
+        require(Transaction(directTransactionAddr).getLocalWhiteList(msg.sender) == true, "Invoker are not in white list");
         _;
     }
 
@@ -67,13 +52,6 @@ contract BrokerDirect {
     }
 
     function initialize() public onlyAdmin {
-        for (uint n = 0; n < localServices.length; n++) {
-            localWhiteList[localServices[n]] = false;
-        }
-        for (uint x = 0; x < proposalList.length; x++) {
-            delete localServiceProposal[proposalList[x]];
-        }
-        delete localServices;
         Transaction(directTransactionAddr).initialize();
         BrokerDirectData(dataAddr).initialize();
     }
@@ -88,59 +66,11 @@ contract BrokerDirect {
     // register local service to Broker
     function register(bool ordered) public {
         require(tx.origin != msg.sender, "register not by contract");
-        if (localWhiteList[msg.sender] || localServiceProposal[msg.sender].exist) {
-            return;
-        }
-
-        localServiceProposal[msg.sender] = Proposal(0, 0, new address[](admins.length), ordered, true);
+        Transaction(directTransactionAddr).register(msg.sender, ordered, admins.length, adminThreshold);
     }
 
     function audit(address addr, int64 status) public onlyAdmin returns (bool) {
-        uint result = vote(addr, status);
-
-        if (result == 0) {
-            return false;
-        }
-
-        if (result == 1) {
-            bool ordered = localServiceProposal[addr].ordered;
-            delete localServiceProposal[addr];
-            localWhiteList[addr] = true;
-            serviceOrdered[addr] = ordered;
-            localServices.push(addr);
-        } else {
-            delete localServiceProposal[addr];
-        }
-
-        return true;
-    }
-
-    // return value explain:
-    // 0: vote is not finished
-    // 1: approve the proposal
-    // 2: reject the proposal
-    function vote(address addr, int64 status) private returns (uint) {
-        require(localServiceProposal[addr].exist, "the proposal does not exist");
-        require(status == 0 || status == 1, "vote status should be 0 or 1");
-
-        for (uint i = 0; i < localServiceProposal[addr].votedAdmins.length; i++) {
-            require(localServiceProposal[addr].votedAdmins[i] != msg.sender, "current use has voted the proposal");
-        }
-
-        localServiceProposal[addr].votedAdmins[localServiceProposal[addr].reject + localServiceProposal[addr].approve] = msg.sender;
-        if (status == 0) {
-            localServiceProposal[addr].reject++;
-            if (localServiceProposal[addr].reject == admins.length - adminThreshold + 1) {
-                return 2;
-            }
-        } else {
-            localServiceProposal[addr].approve++;
-            if (localServiceProposal[addr].approve == adminThreshold) {
-                return 1;
-            }
-        }
-
-        return 0;
+        return Transaction(directTransactionAddr).audit(addr, status, msg.sender, admins.length);
     }
 
     // register remote appchain ID in direct mode, invoked by appchain admin
@@ -161,12 +91,7 @@ contract BrokerDirect {
 
     // get the registered local service list
     function getLocalServiceList() public view returns (string[] memory) {
-        string[] memory fullServiceIDList = new string[](localServices.length);
-        for (uint i = 0; i < localServices.length; i++) {
-            fullServiceIDList[i] = genFullServiceID(BrokerDirectData(dataAddr).addressToString(localServices[i]));
-        }
-
-        return fullServiceIDList;
+        return Transaction(directTransactionAddr).getLocalServiceList(bitxhubID, appchainID);
     }
 
     // get the registered counterparty service list
@@ -181,7 +106,7 @@ contract BrokerDirect {
 
     // get the registered counterparty service list
     function getLocalWhiteList(address addr) public view returns (bool) {
-        return localWhiteList[addr];
+        return Transaction(directTransactionAddr).getLocalWhiteList(addr);
     }
 
     // called on dest chain
@@ -203,10 +128,13 @@ contract BrokerDirect {
         bool[] memory status = new bool[](1);
         status[0] = true;
         bytes[][] memory results = new bytes[][](1);
+
+        if (!checkService(srcFullID, BrokerDirectData(dataAddr).stringToAddress(destAddr), index, dstFullID, typ, isEncrypt, uint64(1))) {
+            return;
+        }
+
         if (txStatus == 0) {
             // INTERCHAIN && BEGIN
-            checkService(srcFullID, BrokerDirectData(dataAddr).stringToAddress(destAddr));
-
             if (BrokerDirectData(dataAddr).getInCounter(servicePair) < index) {
                 (status[0], results[0]) = callService(BrokerDirectData(dataAddr).stringToAddress(destAddr), callFunc, args, false);
             }
@@ -218,8 +146,8 @@ contract BrokerDirect {
             }
         } else {
             // INTERCHAIN && FAILURE || INTERCHAIN && ROLLBACK
-            if (BrokerDirectData(dataAddr).getInCounter(servicePair) >= index) {
-                checkService(srcFullID, BrokerDirectData(dataAddr).stringToAddress(destAddr));
+            // rollback only if RECEIPT_SUCCESS
+            if (BrokerDirectData(dataAddr).getInCounter(servicePair) >= index && BrokerDirectData(dataAddr).getReceiptStatus(servicePair, index)) {
                 (status[0], results[0]) = callService(BrokerDirectData(dataAddr).stringToAddress(destAddr), callFunc, args, true);
             }
             require(BrokerDirectData(dataAddr).invokeIndexUpdate(srcFullID, dstFullID, index, 2));
@@ -254,9 +182,11 @@ contract BrokerDirect {
         bytes[][] memory results = new bytes[][](args.length);
         bool[] memory multiStatus = new bool[](args.length);
         typ = 1;
-        if (txStatus == 0) {
-            checkService(srcFullID, BrokerDirectData(dataAddr).stringToAddress(destAddr));
+        if (!checkService(srcFullID, BrokerDirectData(dataAddr).stringToAddress(destAddr), index, dstFullID, typ, isEncrypt, uint64(args.length))) {
+            return;
+        }
 
+        if (txStatus == 0) {
             // INTERCHAIN && BEGIN
             if (BrokerDirectData(dataAddr).getInCounter(servicePair) < index) {
                 (multiStatus, results) = callMultiService(BrokerDirectData(dataAddr).stringToAddress(destAddr), callFunc, args, false);
@@ -270,8 +200,8 @@ contract BrokerDirect {
             require(BrokerDirectData(dataAddr).invokeIndexUpdate(srcFullID, dstFullID, index, 0));
         } else {
             // INTERCHAIN && FAILURE || INTERCHAIN && ROLLBACK, only happened in relay mode
-            if (BrokerDirectData(dataAddr).getInCounter(servicePair) >= index) {
-                checkService(srcFullID, BrokerDirectData(dataAddr).stringToAddress(destAddr));
+            // rollback only if RECEIPT_SUCCESS
+            if (BrokerDirectData(dataAddr).getInCounter(servicePair) >= index && BrokerDirectData(dataAddr).getReceiptStatus(servicePair, index)) {
                 (multiStatus, results) = callMultiService(BrokerDirectData(dataAddr).stringToAddress(destAddr), callFunc, args, true);
             }
             require(BrokerDirectData(dataAddr).invokeIndexUpdate(srcFullID, dstFullID, index, 2));
@@ -299,6 +229,7 @@ contract BrokerDirect {
         bytes[] memory signatures) payable external {
         string memory srcFullID = genFullServiceID(srcAddr);
         bool isRollback = false;
+        bool isUpdate = true;
         // IBTP_RECEIPT_SUCCESS || IBTP_RECEIPT_FAILURE || IBTP_RECEIPT_ROLLBACK || IBTP_RECEIPT_ROLLBACK_END
         require(typ == 1 || typ == 2 || typ == 3 || typ == 4, "IBTP type is not correct in direct mode");
         if (typ == 1) {
@@ -308,8 +239,10 @@ contract BrokerDirect {
             isRollback = true;
             Transaction(directTransactionAddr).endTransactionFail(srcFullID, dstFullID, index);
         }
+        // src chain rollback, don't update callback counter
         if (typ == 3) {
             isRollback = true;
+            isUpdate = false;
             Transaction(directTransactionAddr).rollbackTransaction(srcFullID, dstFullID, index);
         }
         if (typ == 4) {
@@ -317,7 +250,9 @@ contract BrokerDirect {
             return;
         }
 
-        require(BrokerDirectData(dataAddr).invokeIndexUpdate(srcFullID, dstFullID, index, 1));
+        if (isUpdate){
+            require(BrokerDirectData(dataAddr).invokeIndexUpdate(srcFullID, dstFullID, index, 1));
+        }
 
         string memory outServicePair = genServicePair(srcFullID, dstFullID);
 
@@ -367,6 +302,7 @@ contract BrokerDirect {
         bytes[] memory signatures) payable external {
         string memory srcFullID = genFullServiceID(srcAddr);
         bool isRollback = false;
+        bool isUpdate = true;
         // IBTP_RECEIPT_SUCCESS || IBTP_RECEIPT_FAILURE || IBTP_RECEIPT_ROLLBACK || IBTP_RECEIPT_ROLLBACK_END
         require(typ == 1 || typ == 2 || typ == 3 || typ == 4, "IBTP type is not correct in direct mode");
         if (typ == 1) {
@@ -378,6 +314,7 @@ contract BrokerDirect {
         }
         if (typ == 3) {
             isRollback = true;
+            isUpdate = false;
             Transaction(directTransactionAddr).rollbackTransaction(srcFullID, dstFullID, index);
         }
         if (typ == 4) {
@@ -385,7 +322,9 @@ contract BrokerDirect {
             return;
         }
 
-        require(BrokerDirectData(dataAddr).invokeIndexUpdate(srcFullID, dstFullID, index, 1));
+        if (isUpdate) {
+            require(BrokerDirectData(dataAddr).invokeIndexUpdate(srcFullID, dstFullID, index, 1));
+        }
 
         string memory outServicePair = genServicePair(srcFullID, dstFullID);
 
@@ -586,8 +525,15 @@ contract BrokerDirect {
         return keccak256(packed);
     }
 
-    function checkService(string memory remoteService, address destAddr) private view {
-        require(localWhiteList[destAddr] == true, "dest address is not in local white list");
+    // checkService: 1. check if dst service is registered;
+    // 2. check if src service is registered;
+    // 3. check if src service is in banList;
+    function checkService(string memory remoteService, address destAddr, uint64 index, string memory dstFullID, uint64 typ, bool isEncrypt, uint64 resultsSize) private returns(bool) {
+        //require(localWhiteList[destAddr] == true, "dest address is not in local white list");
+        if (!Transaction(directTransactionAddr).getLocalWhiteList(destAddr)) {
+            invokeIndexUpdateWithError(remoteService, dstFullID, index, typ, isEncrypt, "dest address is not in local white list", resultsSize);
+            return false;
+        }
 
         bool flag = false;
         string[] memory remoteServices = Transaction(directTransactionAddr).getRemoteServiceList();
@@ -597,7 +543,11 @@ contract BrokerDirect {
                 break;
             }
         }
-        require(flag == true, "remote service is not registered");
+        //require(flag == true, "remote service is not registered");
+        if (!flag) {
+            invokeIndexUpdateWithError(remoteService, dstFullID, index, typ, isEncrypt, "remote service is not registered", resultsSize);
+            return false;
+        }
 
         flag = false;
         address[] memory banList = Transaction(directTransactionAddr).getRSWhiteList(remoteService);
@@ -607,7 +557,44 @@ contract BrokerDirect {
                 break;
             }
         }
-        require(flag == false, "remote service is not allowed to call dest address");
+        if (flag) {
+            invokeIndexUpdateWithError(remoteService, dstFullID, index, typ, isEncrypt, "remote service is not allowed to call dest address", resultsSize);
+            return false;
+        }
+        return true;
+    }
+
+    function invokeIndexUpdateWithError(string memory srcFullID, string memory dstFullID, uint64 index, uint64 typ, bool isEncrypt, string memory errorMsg, uint64 resultsSize) private {
+        string memory servicePair = genServicePair(srcFullID, dstFullID);
+        bytes[][] memory results = new bytes[][](resultsSize);
+        bytes[] memory result = new bytes[](1);
+        result[0] = bytes(errorMsg);
+        for (uint64 i = 0; i < resultsSize; i++) {
+            results[i] = result;
+        }
+
+        // INTERCHAIN => RECEIPT_FAIL
+        // RECEIPT_ROLLBACK => RECEIPT_ROLLBACK_END
+        if (typ == 0) {
+            require(BrokerDirectData(dataAddr).invokeIndexUpdate(srcFullID, dstFullID, index, 0));
+            typ = 2;
+        } else {
+            require(BrokerDirectData(dataAddr).invokeIndexUpdate(srcFullID, dstFullID, index, 2));
+            typ = 4;
+        }
+
+        bool[] memory multiStatus = new bool[](resultsSize);
+        for (uint64 i = 0; i < resultsSize; i++) {
+            multiStatus[i] = false;
+        }
+
+        BrokerDirectData(dataAddr).setReceiptMessage(servicePair, index, isEncrypt, typ, results, multiStatus);
+
+        if (isEncrypt) {
+            emit throwReceiptEvent(index, dstFullID, srcFullID, typ, new bytes[][](0), computeHash(results), multiStatus);
+        } else {
+            emit throwReceiptEvent(index, dstFullID, srcFullID, typ, results, computeHash(results), multiStatus);
+        }
     }
 }
 
@@ -637,6 +624,14 @@ abstract contract Transaction {
     function getTransactionStatus(string memory IBTPid) public view virtual returns (uint64);
 
     function getStartTimestamp(string memory IBTPid) public view virtual returns (uint);
+
+    function register(address addr, bool ordered, uint admins, uint64 _adminThreshold) public virtual;
+
+    function audit(address addr, int64 status, address voter, uint admins) public virtual returns (bool);
+
+    function getLocalServiceList(string memory bitxhubID, string memory appchainID) public view virtual returns (string[] memory);
+
+    function getLocalWhiteList(address addr) public view virtual returns (bool);
 }
 
 abstract contract BrokerDirectData {
@@ -677,6 +672,8 @@ abstract contract BrokerDirectData {
     function getOutMessage(string memory outServicePair, uint64 idx) public view virtual returns (string memory, bytes[] memory, bool, string[] memory);
 
     function getReceiptMessage(string memory inServicePair, uint64 idx) public view virtual returns (bytes[][] memory, uint64, bool, bool[] memory);
+
+    function getReceiptStatus(string memory inServicePair, uint64 idx) public view virtual returns (bool);
 
     function getInnerMeta() public view virtual returns (string[] memory, uint64[] memory);
 
