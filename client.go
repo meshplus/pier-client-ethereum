@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -201,49 +200,20 @@ func (c *Client) SubmitIBTP(from string, index uint64, serviceID string, ibtpTyp
 	//	ret.Status = false
 	//	return ret, nil
 	//}
-	typ := int64(binary.BigEndian.Uint64(content.Args[0]))
-	if typ == int64(pb.IBTP_Multi) {
-		lenArgs := len(content.Args) - 2
-		num := int(binary.BigEndian.Uint64(content.Args[1])) //convert byte to Uint64
-		if lenArgs%num != 0 {
-			return ret, fmt.Errorf("format error for IBTP carrying multiple transactions")
-		}
-
-		var Args [][][]byte
-		for i := 2; i < len(content.Args); {
-			Args = append(Args, content.Args[i:i+num])
-			i += num
-		}
-		receipt, err := c.InvokeMultiInterchain(from, index, serviceID, uint64(ibtpType), content.Func, Args, uint64(proof.TxStatus), proof.MultiSign, isEncrypted)
-		if err != nil {
-			ret.Status = false
-			ret.Message = err.Error()
-			logger.Warn("SubmitIBTP:", ret.Status, ret.Message)
-			return ret, nil
-		}
-		if receipt.Status != types.ReceiptStatusSuccessful {
-			ret.Status = false
-			ret.Message = SubmitIBTPErr
-			return ret, nil
-		}
-		logger.Info("SubmitIBTP:", ret.Status, ret.Message, "txHash: ", receipt.TxHash)
-	} else {
-		content.Args = content.Args[1:]
-		receipt, err := c.invokeInterchain(from, index, serviceID, uint64(ibtpType), content.Func, content.Args, uint64(proof.TxStatus), proof.MultiSign, isEncrypted)
-		if err != nil {
-			ret.Status = false
-			ret.Message = err.Error()
-			logger.Warn("SubmitIBTP:", ret.Status, ret.Message)
-			return ret, nil
-		}
-
-		if receipt.Status != types.ReceiptStatusSuccessful {
-			ret.Status = false
-			ret.Message = SubmitIBTPErr
-			return ret, nil
-		}
-		logger.Info("SubmitIBTP:", ret.Status, ret.Message, "txHash: ", receipt.TxHash)
+	receipt, err := c.invokeInterchain(from, index, serviceID, uint64(ibtpType), content.Func, content.Args, uint64(proof.TxStatus), proof.MultiSign, isEncrypted)
+	if err != nil {
+		ret.Status = false
+		ret.Message = err.Error()
+		logger.Warn("SubmitIBTP:", ret.Status, ret.Message)
+		return ret, nil
 	}
+
+	if receipt.Status != types.ReceiptStatusSuccessful {
+		ret.Status = false
+		ret.Message = SubmitIBTPErr
+		return ret, nil
+	}
+	logger.Info("SubmitIBTP:", ret.Status, ret.Message, "txHash: ", receipt.TxHash)
 
 	return ret, nil
 }
@@ -283,33 +253,17 @@ func (c *Client) SubmitReceipt(to string, index uint64, serviceID string, ibtpTy
 		results = append(results, s.Data)
 	}
 
-	// if src chain need rollback, the length of results is 0
-	if len(result.MultiStatus) > 1 || (len(result.MultiStatus) == 0 && proof.TxStatus != pb.TransactionStatus_BEGIN) {
-		receipt, err := c.InvokeMultiReceipt(serviceID, to, index, uint64(ibtpType), results, result.MultiStatus, uint64(proof.TxStatus), proof.MultiSign)
-		if err != nil {
-			ret.Status = false
-			ret.Message = err.Error()
-			return ret, nil
-		}
+	// The case where a rollback is required in the source chain of a single transaction
+	receipt, err := c.invokeReceipt(serviceID, to, index, uint64(ibtpType), results, result.MultiStatus, uint64(proof.TxStatus), proof.MultiSign)
+	if err != nil {
+		ret.Status = false
+		ret.Message = err.Error()
+		return ret, nil
+	}
 
-		if receipt.Status != types.ReceiptStatusSuccessful {
-			ret.Status = false
-			ret.Message = SubmitReceiptErr
-		}
-
-	} else {
-		// The case where a rollback is required in the source chain of a single transaction
-		receipt, err := c.invokeReceipt(serviceID, to, index, uint64(ibtpType), results, uint64(proof.TxStatus), proof.MultiSign)
-		if err != nil {
-			ret.Status = false
-			ret.Message = err.Error()
-			return ret, nil
-		}
-
-		if receipt.Status != types.ReceiptStatusSuccessful {
-			ret.Status = false
-			ret.Message = SubmitReceiptErr
-		}
+	if receipt.Status != types.ReceiptStatusSuccessful {
+		ret.Status = false
+		ret.Message = SubmitReceiptErr
 	}
 
 	return ret, nil
@@ -328,7 +282,6 @@ func (c *Client) SubmitIBTPBatch(from []string, index []uint64, serviceID []stri
 	)
 	for idx, ct := range content {
 		callFunc = append(callFunc, ct.Func)
-		ct.Args = ct.Args[1:]
 		args = append(args, ct.Args)
 		typ = append(typ, uint64(ibtpType[idx]))
 		txStatus = append(txStatus, uint64(proof[idx].TxStatus))
@@ -363,9 +316,41 @@ func (c *Client) SubmitIBTPBatch(from []string, index []uint64, serviceID []stri
 
 	return ret, nil
 }
+func (c *Client) SubmitReceiptBatch(tos []string, indexs []uint64, serviceIDs []string, ibtpTypes []pb.IBTP_Type, batchResult []*pb.Result, proofs []*pb.BxhProof) (*pb.SubmitIBTPResponse, error) {
+	ret := &pb.SubmitIBTPResponse{Status: true}
+	batchResults := make([][][][]byte, 0)
+	batchMultiStatus := make([][]bool, 0)
+	for _, result := range batchResult {
+		var results [][][]byte
+		for _, s := range result.Data {
+			results = append(results, s.Data)
+		}
+		batchMultiStatus = append(batchMultiStatus, result.MultiStatus)
+		batchResults = append(batchResults, results)
+	}
+	ibtpTyps := make([]uint64, 0)
+	for _, ibtpType := range ibtpTypes {
+		ibtpTyps = append(ibtpTyps, uint64(ibtpType))
+	}
 
-func (c *Client) SubmitReceiptBatch(_ []string, _ []uint64, _ []string, _ []pb.IBTP_Type, _ []*pb.Result, _ []*pb.BxhProof) (*pb.SubmitIBTPResponse, error) {
-	panic("implement me")
+	batchTxStatus := make([]uint64, 0)
+	multiSigns := make([][][]byte, 0)
+	for _, proof := range proofs {
+		batchTxStatus = append(batchTxStatus, uint64(proof.TxStatus))
+		multiSigns = append(multiSigns, proof.MultiSign)
+	}
+
+	// The case where a rollback is required in the source chain of a single transaction
+	receipt, err := c.invokeReceipts(serviceIDs, tos, indexs, ibtpTyps, batchResults, batchMultiStatus, batchTxStatus, multiSigns)
+	if err != nil {
+		ret.Status = false
+		ret.Message = err.Error()
+		logger.Warn("SubmitReceipts:", ret.Status, ret.Message)
+		return ret, nil
+	}
+
+	logger.Info("txHash: ", receipt.TxHash)
+	return ret, nil
 }
 
 //nolint:dupl
@@ -418,61 +403,7 @@ func (c *Client) invokeInterchain(srcFullID string, index uint64, destAddr strin
 	return c.waitForConfirmed(tx.Hash()), nil
 }
 
-//nolint:dupl
-func (c *Client) InvokeMultiInterchain(srcFullID string, index uint64, destAddr string, reqType uint64, callFunc string, args [][][]byte, txStatus uint64, multiSign [][]byte, encrypt bool) (*types.Receipt, error) {
-	arg := make([][]byte, len(args))
-	for i := 0; i < len(args); i++ {
-		arg[i] = bytes.Join(args[i], []byte(","))
-	}
-	c.lock.Lock()
-	var tx *types.Transaction
-	var txErr error
-	if err := retry.Retry(func(attempt uint) error {
-		if c.session == nil {
-			tx, txErr = c.sessionDirect.InvokeMultiInterchain(srcFullID, destAddr, index, reqType, callFunc, args, txStatus, multiSign, encrypt)
-		} else {
-			tx, txErr = c.session.InvokeMultiInterchain(srcFullID, destAddr, index, reqType, callFunc, args, txStatus, multiSign, encrypt)
-		}
-		if txErr != nil {
-			logger.Warn("Call InvokeMultiInterchain failed",
-				"srcFullID", srcFullID,
-				"destAddr", destAddr,
-				"index", fmt.Sprintf("%d", index),
-				"reqType", strconv.Itoa(int(reqType)),
-				"callFunc", callFunc,
-				"args", string(bytes.Join(arg, []byte(","))),
-				"txStatus", strconv.Itoa(int(txStatus)),
-				"multiSign size", strconv.Itoa(len(multiSign)),
-				"encrypt", strconv.FormatBool(encrypt),
-				"error", txErr.Error(),
-			)
-
-			for i, Arg := range arg {
-				logger.Warn("args", strconv.Itoa(i), hexutil.Encode(Arg))
-			}
-
-			for i, sign := range multiSign {
-				logger.Warn("multiSign", strconv.Itoa(i), hexutil.Encode(sign))
-			}
-
-			if strings.Contains(txErr.Error(), "execution reverted") {
-				return nil
-			}
-		}
-
-		return txErr
-	}, strategy.Wait(2*time.Second)); err != nil {
-		logger.Error("Can't invoke contract", "error", err)
-	}
-	c.lock.Unlock()
-
-	if txErr != nil {
-		return nil, txErr
-	}
-	return c.waitForConfirmed(tx.Hash()), nil
-}
-
-func (c *Client) invokeReceipt(srcAddr string, dstFullID string, index uint64, reqType uint64, results [][][]byte, txStatus uint64, multiSign [][]byte) (*types.Receipt, error) {
+func (c *Client) invokeReceipt(srcAddr string, dstFullID string, index uint64, reqType uint64, results [][][]byte, multiStatus []bool, txStatus uint64, multiSign [][]byte) (*types.Receipt, error) {
 	result := make([][]byte, len(results))
 	for i := 0; i < len(results); i++ {
 		result[i] = bytes.Join(results[i], []byte(","))
@@ -484,7 +415,7 @@ func (c *Client) invokeReceipt(srcAddr string, dstFullID string, index uint64, r
 		if c.session == nil {
 			tx, txErr = c.sessionDirect.InvokeReceipt(srcAddr, dstFullID, index, reqType, results, txStatus, multiSign)
 		} else {
-			tx, txErr = c.session.InvokeReceipt(srcAddr, dstFullID, index, reqType, results, txStatus, multiSign)
+			tx, txErr = c.session.InvokeReceipt(srcAddr, dstFullID, index, reqType, results, multiStatus, txStatus, multiSign)
 		}
 		if txErr != nil {
 			logger.Warn("Call InvokeReceipt failed",
@@ -523,40 +454,22 @@ func (c *Client) invokeReceipt(srcAddr string, dstFullID string, index uint64, r
 	return c.waitForConfirmed(tx.Hash()), nil
 }
 
-func (c *Client) InvokeMultiReceipt(srcAddr string, destFullID string, index uint64, reqType uint64, results [][][]byte, multiStatus []bool, txStatus uint64, multiSign [][]byte) (*types.Receipt, error) {
-	result := make([][]byte, len(results))
-	for i := 0; i < len(results); i++ {
-		result[i] = bytes.Join(results[i], []byte(","))
-	}
+func (c *Client) invokeReceipts(srcAddrs []string, dstFullIDs []string, indexs []uint64, reqTypes []uint64,
+	batchResults [][][][]byte, batchMultiStatus [][]bool, batchTxStatus []uint64, batchMultiSign [][][]byte) (*types.Receipt, error) {
 	c.lock.Lock()
 	var tx *types.Transaction
 	var txErr error
 	if err := retry.Retry(func(attempt uint) error {
 		if c.session == nil {
-			tx, txErr = c.sessionDirect.InvokeMultiReceipt(srcAddr, destFullID, index, reqType, results, multiStatus, txStatus, multiSign)
+			txErr = fmt.Errorf("direct mode is not support invokeReceipts")
+			return nil
 		} else {
-			tx, txErr = c.session.InvokeMultiReceipt(srcAddr, destFullID, index, reqType, results, multiStatus, txStatus, multiSign)
+			tx, txErr = c.session.InvokeReceipts(srcAddrs, dstFullIDs, indexs, reqTypes, batchResults, batchMultiStatus, batchTxStatus, batchMultiSign)
 		}
 		if txErr != nil {
-			logger.Warn("Call InvokeReceipt failed",
-				"srcAddr", srcAddr,
-				"dstFullID", destFullID,
-				"index", fmt.Sprintf("%d", index),
-				"reqType", strconv.Itoa(int(reqType)),
-				"result", string(bytes.Join(result, []byte(","))),
-				"txStatus", strconv.Itoa(int(txStatus)),
-				"multiSign size", strconv.Itoa(len(multiSign)),
+			logger.Warn("Call InvokeReceipts failed",
 				"error", txErr.Error(),
 			)
-
-			for i, arg := range result {
-				logger.Warn("result", strconv.Itoa(i), hexutil.Encode(arg))
-			}
-
-			for i, sign := range multiSign {
-				logger.Warn("multiSign", strconv.Itoa(i), hexutil.Encode(sign))
-			}
-
 			if strings.Contains(txErr.Error(), "execution reverted") {
 				return nil
 			}

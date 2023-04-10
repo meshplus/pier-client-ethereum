@@ -1,7 +1,9 @@
+// SPDX-License-Identifier: Unlicensed
 pragma solidity >=0.6.9 <=0.7.6;
 pragma experimental ABIEncoderV2;
+import "./IBroker.sol";
 
-contract BrokerData {
+contract BrokerData is IBroker {
     struct Proposal {
         uint64 approve;
         uint64 reject;
@@ -77,7 +79,7 @@ contract BrokerData {
         adminThreshold = _adminThreshold;
     }
 
-    function initialize() public onlyBroker {
+    function initialize() external onlyBroker override {
         for (uint i = 0; i < inServicePairs.length; i++) {
             inCounter[inServicePairs[i]] = 0;
         }
@@ -95,12 +97,12 @@ contract BrokerData {
         delete callbackServicePairs;
     }
 
-    function setAdmins(address[] memory _admins, uint64 _adminThreshold) public onlyAdmin {
+    function setAdmins(address[] memory _admins, uint64 _adminThreshold) external onlyAdmin {
         admins = _admins;
         adminThreshold = _adminThreshold;
     }
 
-    function register() public {
+    function register() external override {
         require(tx.origin != msg.sender, "register not by contract");
         if (BrokerAddr == msg.sender || localProposal[msg.sender].exist) {
             return;
@@ -109,7 +111,7 @@ contract BrokerData {
         localProposal[msg.sender] = Proposal(0, 0, new address[](admins.length), true);
     }
 
-    function audit(address addr, int64 status) public onlyAdmin returns (bool) {
+    function audit(address addr, int64 status) external onlyAdmin returns (bool) {
         uint result = vote(addr, status);
 
         if (result == 0) {
@@ -154,8 +156,36 @@ contract BrokerData {
         return 0;
     }
 
+    function invokeIndexUpdateForBatch(string memory srcFullID, string memory dstFullID, uint64 index, uint64 reqType) external onlyBroker override returns(bool) {
+        string memory servicePair = genServicePair(srcFullID, dstFullID);
+        if (reqType == 0) {
+            markInCounter(servicePair);
+        } else if (reqType == 1) {
+            // invoke src callback or rollback
+            if (callbackCounter[servicePair] == 0) {
+                callbackServicePairs.push(servicePair);
+                callbackCounter[servicePair]=1;
+            } else {
+                callbackCounter[servicePair]++;
+            }
 
-    function invokeIndexUpdate(string memory srcFullID, string memory dstFullID, uint64 index, uint64 reqType) public onlyBroker returns(bool) {
+        } else if (reqType == 2) {
+            // invoke dst rollback
+            if (dstRollbackCounter[servicePair] + 1 > index) {
+                Receipt memory receipt = receiptMessages[servicePair][index];
+                if (receipt.typ != 1) {
+                    return false;
+                }
+            }
+            markDstRollbackCounter(servicePair, index);
+            if (inCounter[servicePair] + 1 == index) {
+                markInCounter(servicePair);
+            }
+        }
+        return true;
+    }
+
+    function invokeIndexUpdate(string memory srcFullID, string memory dstFullID, uint64 index, uint64 reqType) external onlyBroker override returns(bool) {
         string memory servicePair = genServicePair(srcFullID, dstFullID);
         if (reqType == 0) {
             if (inCounter[servicePair] + 1 != index) {
@@ -207,7 +237,7 @@ contract BrokerData {
         }
     }
 
-    function markOutCounter(string memory servicePair) public onlyBroker returns(uint64) {
+    function markOutCounter(string memory servicePair) external onlyBroker override returns(uint64) {
         outCounter[servicePair]++;
         if (outCounter[servicePair] == 1) {
             outServicePairs.push(servicePair);
@@ -216,7 +246,7 @@ contract BrokerData {
     }
 
     // The helper functions that help plugin query.
-    function getOuterMeta() public view onlyBroker returns (string[] memory, uint64[] memory) {
+    function getOuterMeta() external view onlyBroker override returns (string[] memory, uint64[] memory) {
         uint64[] memory indices = new uint64[](outServicePairs.length);
         for (uint64 i = 0; i < outServicePairs.length; i++) {
             indices[i] = outCounter[outServicePairs[i]];
@@ -225,17 +255,17 @@ contract BrokerData {
         return (outServicePairs, indices);
     }
 
-    function getOutMessage(string memory outServicePair, uint64 idx) public view onlyBroker returns (string memory, bytes[] memory, bool, string[] memory) {
+    function getOutMessage(string memory outServicePair, uint64 idx) external view onlyBroker override returns (string memory, bytes[] memory, bool, string[] memory) {
         InterchainInvoke memory invoke = outMessages[outServicePair][idx];
         return (invoke.callFunc.func, invoke.callFunc.args, invoke.encrypt, invoke.group);
     }
 
-    function getReceiptMessage(string memory inServicePair, uint64 idx) public view onlyBroker returns (bytes[][] memory, uint64, bool, bool[] memory)  {
+    function getReceiptMessage(string memory inServicePair, uint64 idx) external view onlyBroker override returns (bytes[][] memory, uint64, bool, bool[] memory)  {
         Receipt memory receipt = receiptMessages[inServicePair][idx];
         return (receipt.results, receipt.typ, receipt.encrypt, receipt.multiStatus);
     }
 
-    function getInnerMeta() public view onlyBroker returns (string[] memory, uint64[] memory) {
+    function getInnerMeta() external view onlyBroker override returns (string[] memory, uint64[] memory) {
         uint64[] memory indices = new uint64[](inServicePairs.length);
         for (uint i = 0; i < inServicePairs.length; i++) {
             indices[i] = inCounter[inServicePairs[i]];
@@ -244,7 +274,7 @@ contract BrokerData {
         return (inServicePairs, indices);
     }
 
-    function getCallbackMeta() public view onlyBroker returns (string[] memory, uint64[] memory) {
+    function getCallbackMeta() external view onlyBroker override returns (string[] memory, uint64[] memory) {
         uint64[] memory indices = new uint64[](callbackServicePairs.length);
         for (uint64 i = 0; i < callbackServicePairs.length; i++) {
             indices[i] = callbackCounter[callbackServicePairs[i]];
@@ -253,7 +283,7 @@ contract BrokerData {
         return (callbackServicePairs, indices);
     }
 
-    function getDstRollbackMeta() public view onlyBroker returns (string[] memory, uint64[] memory) {
+    function getDstRollbackMeta() external view onlyBroker override returns (string[] memory, uint64[] memory) {
         uint64[] memory indices = new uint64[](inServicePairs.length);
         for (uint i = 0; i < inServicePairs.length; i++) {
             indices[i] = dstRollbackCounter[inServicePairs[i]];
@@ -262,29 +292,29 @@ contract BrokerData {
         return (inServicePairs, indices);
     }
 
-    function getOutCounter(string memory servicePair) public view onlyBroker returns(uint64) {
+    function getOutCounter(string memory servicePair) external view onlyBroker returns(uint64) {
         return outCounter[servicePair];
     }
 
-    function getInCounter(string memory servicePair) public view onlyBroker returns(uint64) {
+    function getInCounter(string memory servicePair) external view onlyBroker override returns(uint64) {
         return inCounter[servicePair];
     }
 
-    function getCallbackCounter(string memory servicePair) public view onlyBroker returns(uint64) {
+    function getCallbackCounter(string memory servicePair) external view onlyBroker returns(uint64) {
         return callbackCounter[servicePair];
     }
 
-    function getCallbackMessage(string memory servicePair, uint64 index) public view onlyBroker returns(string memory, bytes[] memory) {
+    function getCallbackMessage(string memory servicePair, uint64 index) external view onlyBroker override returns(string memory, bytes[] memory) {
         InterchainInvoke memory invoke = outMessages[servicePair][index];
         return (invoke.callback.func, invoke.callback.args);
     }
 
-    function getRollbackMessage(string memory servicePair, uint64 index) public view onlyBroker returns(string memory, bytes[] memory) {
+    function getRollbackMessage(string memory servicePair, uint64 index) external view onlyBroker override returns(string memory, bytes[] memory) {
         InterchainInvoke memory invoke = outMessages[servicePair][index];
         return (invoke.rollback.func, invoke.rollback.args);
     }
 
-    function setReceiptMessage(string memory servicePair, uint64 index, bool isEncrypt, uint64 typ, bytes[][] memory results, bool[] memory multiStatus) public onlyBroker {
+    function setReceiptMessage(string memory servicePair, uint64 index, bool isEncrypt, uint64 typ, bytes[][] memory results, bool[] memory multiStatus) external onlyBroker override {
         receiptMessages[servicePair][index] = Receipt(isEncrypt, typ, results, multiStatus);
     }
 
@@ -296,7 +326,7 @@ contract BrokerData {
         string memory funcCb,
         bytes[] memory argsCb,
         string memory funcRb,
-        bytes[] memory argsRb) public onlyBroker {
+        bytes[] memory argsRb) external onlyBroker override {
         outMessages[servicePair][outCounter[servicePair]] = InterchainInvoke(isEncrypt, group,
             CallFunc(funcCall, args),
             CallFunc(funcCb, argsCb),
@@ -313,11 +343,10 @@ contract BrokerData {
         uint64 txStatus,
         bytes[] memory multiSignatures,
         address[] memory validators,
-        uint64 valThreshold) public returns(bool) {
+        uint64 valThreshold) external override returns(bool) {
         bytes memory packed = abi.encodePacked(srcFullID, dstFullID, index, typ);
         bytes memory funcPacked = abi.encodePacked(callFunc);
 
-        funcPacked = abi.encodePacked(funcPacked, uint64(0));
         for (uint i = 0; i < args.length; i++) {
             funcPacked = abi.encodePacked(funcPacked, args[i]);
         }
@@ -325,37 +354,6 @@ contract BrokerData {
         bytes32 hash = keccak256(packed);
 
         //require(checkMultiSigns(hash, multiSignatures), "invalid multi-signature");
-        return checkMultiSigns(hash, multiSignatures, validators, valThreshold);
-    }
-
-    function checkMultiInterchainMultiSigns(string memory srcFullID,
-        string memory dstFullID,
-        uint64 index,
-        uint64 typ,
-        string memory callFunc,
-        bytes[][] memory args,
-        uint64 txStatus,
-        bytes[] memory multiSignatures,
-        address[] memory validators,
-        uint64 valThreshold) public returns (bool) {
-        bytes memory packed = abi.encodePacked(srcFullID, dstFullID, index, typ);
-        bytes memory funcPacked = abi.encodePacked(callFunc);
-        funcPacked = abi.encodePacked(funcPacked, uint64(1));
-        if (args.length == 0) {
-            funcPacked = abi.encodePacked(funcPacked, uint64(0));
-        } else {
-            funcPacked = abi.encodePacked(funcPacked, uint64(args[0].length));
-        }
-        for (uint i = 0; i < args.length; i++) {
-            bytes[] memory arg = args[i];
-            for (uint j = 0; j < arg.length; j++) {
-                funcPacked = abi.encodePacked(funcPacked, arg[j]);
-            }
-        }
-        packed = abi.encodePacked(packed, keccak256(funcPacked), txStatus);
-        bytes32 hash = keccak256(packed);
-
-        //        require(checkMultiSigns(hash, multiSignatures), "invalid MultiInterchain-multi-signature");
         return checkMultiSigns(hash, multiSignatures, validators, valThreshold);
     }
 
@@ -367,7 +365,7 @@ contract BrokerData {
         uint64 txStatus,
         bytes[] memory multiSignatures,
         address[] memory validators,
-        uint64 valThreshold) public returns(bool) {
+        uint64 valThreshold) external override returns(bool) {
         bytes memory packed = abi.encodePacked(srcFullID, dstFullID, index, typ);
         bytes memory data;
         if (typ == 0) {
@@ -453,9 +451,44 @@ contract BrokerData {
         }
     }
 
+    function getSplitLength(string memory _str, string memory _delimiter) external pure override returns (uint8) {
+        bytes memory strBytes = bytes(_str);
+        bytes memory delimiterBytes = bytes(_delimiter);
+        uint count = 1;
+        for (uint i = 0; i < strBytes.length; i++) {
+            if (strBytes[i] == delimiterBytes[0]) {
+                count++;
+            }
+        }
+        string[] memory parts = new string[](count);
+        uint startIndex = 0;
+        uint partIndex = 0;
+        for (uint i = 0; i < strBytes.length; i++) {
+            if (strBytes[i] == delimiterBytes[0]) {
+                uint endIndex = i;
+                string memory part = new string(endIndex - startIndex);
+                bytes memory partBytes = bytes(part);
+                for (uint j = startIndex; j < endIndex; j++) {
+                    partBytes[j - startIndex] = strBytes[j];
+                }
+                parts[partIndex] = string(partBytes);
+                partIndex++;
+                startIndex = i + 1;
+            }
+        }
+        uint lastPartLength = strBytes.length - startIndex;
+        string memory lastPart = new string(lastPartLength);
+        bytes memory lastPartBytes = bytes(lastPart);
+        for (uint i = startIndex; i < strBytes.length; i++) {
+            lastPartBytes[i - startIndex] = strBytes[i];
+        }
+        parts[partIndex] = string(lastPartBytes);
+        return uint8(parts.length);
+    }
+
     function addressToString(
         address account
-    ) public pure returns (string memory asciiString) {
+    ) external pure override returns (string memory asciiString) {
         // convert the account argument from address to bytes.
         bytes20 data = bytes20(account);
 
@@ -562,7 +595,7 @@ contract BrokerData {
         return string(asciiBytes);
     }
 
-    function stringToAddress(string memory _address) public pure returns (address) {
+    function stringToAddress(string memory _address) external pure override returns (address) {
         bytes memory temp = bytes(_address);
         if(temp.length != 42) {
             revert(string(abi.encodePacked(_address, " is not a valid address")));
@@ -595,7 +628,7 @@ contract BrokerData {
         return address(result);
     }
 
-    function checkAppchainIdContains (string memory appchainId, string memory destFullService) public pure returns(bool) {
+    function checkAppchainIdContains (string memory appchainId, string memory destFullService) external pure override returns(bool) {
         bytes memory whatBytes = bytes (appchainId);
         bytes memory whereBytes = bytes (destFullService);
 

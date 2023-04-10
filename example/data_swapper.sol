@@ -26,14 +26,16 @@ contract DataSwapper {
         return dataM[key];
     }
 
-    function get(string memory destChainServiceID, string memory key) public {
-        bytes[] memory args = new bytes[](2);
-        args[0] = abi.encodePacked(uint64(0));
-        args[1] = abi.encodePacked(key);
-
-        bytes[] memory argsCb = new bytes[](1);
-        argsCb[0] = abi.encodePacked(key);
-
+    function get(string memory destChainServiceID, string[] memory keyArr) public {
+        uint len = keyArr.length;
+        bytes[] memory args = new bytes[](len);
+        for (uint i = 0; i < len; i++) {
+            args[i] = abi.encodePacked(keyArr[i]);
+        }
+        bytes[] memory argsCb = new bytes[](len);
+        for (uint i = 0; i < len; i++) {
+            argsCb[i] = abi.encodePacked(keyArr[i]);
+        }
         Broker(BrokerAddr).emitInterchainEvent(destChainServiceID, "interchainGet", args, "interchainSet", argsCb, "", new bytes[](0), false, new string[](0));
     }
 
@@ -41,21 +43,27 @@ contract DataSwapper {
         dataM[key] = value;
     }
 
-    function interchainSet(bytes[] memory args) public onlyBroker {
-        require(args.length == 2, "interchainSet args' length is not correct, expect 2");
-        string memory key = string(args[0]);
-        string memory value = string(args[1]);
-        set(key, value);
+    function interchainSet(bytes[] memory args,bool[] memory multiStatus,bytes[][] memory results) public onlyBroker {
+        require(args.length == results.length, "interchainSet args' length must equals results' length");
+        for (uint i = 0;i < args.length; i++){
+            string memory key = string(args[i]);
+            string memory value = string(results[i][0]);
+            set(key, value);
+        }
     }
 
-    function interchainGet(bytes[] memory args, bool isRollback) public onlyBroker returns(bytes[] memory) {
-        require(args.length == 1, "interchainGet args' length is not correct, expect 1");
-        string memory key = string(args[0]);
-
-        bytes[] memory result = new bytes[](1);
-        result[0] = abi.encodePacked(dataM[key]);
-
-        return result;
+    function interchainGet(bytes[] memory args, bool isRollback) public view onlyBroker returns(bytes[][] memory,bool[] memory) {
+        uint len=args.length;
+        bool[] memory multiStatus = new bool[](len);
+        bytes[][] memory result=new bytes[][](len);
+        for(uint i=0;i<len;i++){
+            string memory key = string(args[i]);
+            bytes[] memory tmp = new bytes[](1);
+            tmp[0] = abi.encodePacked(dataM[key]);
+            result[i] = tmp;
+            multiStatus[i] = true;
+        }
+        return (result,multiStatus);
     }
 }
 
