@@ -9,9 +9,10 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/meshplus/bitxhub-model/pb"
+	"github.com/meshplus/pier-client-ethereum/relay"
 )
 
-func (c *Client) Convert2IBTP(ev *BrokerThrowInterchainEvent, timeoutHeight int64) (*pb.IBTP, error) {
+func (c *Client) Convert2IBTP(ev *relay.BrokerThrowInterchainEvent, timeoutHeight int64) (*pb.IBTP, error) {
 	fullEv, encrypt, err := c.fillInterchainEvent(ev)
 	if err != nil {
 		return nil, err
@@ -60,7 +61,7 @@ func (c *Client) fillGroup(evGroup []string) (*pb.StringUint64Map, error) {
 	}, nil
 }
 
-func (c *Client) Convert2Receipt(ev *BrokerThrowReceiptEvent) (*pb.IBTP, error) {
+func (c *Client) Convert2Receipt(ev *relay.BrokerThrowReceiptEvent) (*pb.IBTP, error) {
 	fullEv, encrypt, err := c.fillReceiptEvent(ev)
 	if err != nil {
 		return nil, err
@@ -69,7 +70,7 @@ func (c *Client) Convert2Receipt(ev *BrokerThrowReceiptEvent) (*pb.IBTP, error) 
 	return generateReceipt(fullEv.SrcFullID, fullEv.DstFullID, fullEv.Index, fullEv.Results, fullEv.Typ, encrypt, fullEv.MultiStatus)
 }
 
-func encodePayload(ev *BrokerThrowInterchainEvent, encrypt bool) ([]byte, error) {
+func encodePayload(ev *relay.BrokerThrowInterchainEvent, encrypt bool) ([]byte, error) {
 	var args [][]byte
 	args = append(args, ev.Args...)
 	//for _, arg := range ev.Args {
@@ -92,7 +93,7 @@ func encodePayload(ev *BrokerThrowInterchainEvent, encrypt bool) ([]byte, error)
 	return ibtppd.Marshal()
 }
 
-func (c *Client) fillInterchainEvent(ev *BrokerThrowInterchainEvent) (*BrokerThrowInterchainEvent, bool, error) {
+func (c *Client) fillInterchainEvent(ev *relay.BrokerThrowInterchainEvent) (*relay.BrokerThrowInterchainEvent, bool, error) {
 	if ev.Func == "" {
 		fun, args, encrypt, group, err := c.session.GetOutMessage(pb.GenServicePair(ev.SrcFullID, ev.DstFullID), ev.Index)
 		if err != nil {
@@ -120,7 +121,7 @@ func (c *Client) fillInterchainEvent(ev *BrokerThrowInterchainEvent) (*BrokerThr
 	return ev, false, nil
 }
 
-func (c *Client) fillReceiptEvent(ev *BrokerThrowReceiptEvent) (*BrokerThrowReceiptEvent, bool, error) {
+func (c *Client) fillReceiptEvent(ev *relay.BrokerThrowReceiptEvent) (*relay.BrokerThrowReceiptEvent, bool, error) {
 	if ev.Results == nil {
 		results, typ, encrypt, multiStatus, err := c.session.GetReceiptMessage(pb.GenServicePair(ev.SrcFullID, ev.DstFullID), ev.Index)
 		if err != nil {

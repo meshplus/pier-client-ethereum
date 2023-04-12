@@ -1,10 +1,14 @@
 //nolint:dupl
 package main
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/meshplus/pier-client-ethereum/direct"
+)
 
 func (c *Client) StartDirectConsumer() error {
-	loop := func(interchainCh chan *BrokerDirectThrowInterchainEvent, receiptCh chan *BrokerDirectThrowReceiptEvent) {
+	loop := func(interchainCh chan *direct.BrokerDirectThrowInterchainEvent, receiptCh chan *direct.BrokerDirectThrowReceiptEvent) {
 		for {
 			select {
 			case interchainEv := <-interchainCh:
@@ -27,8 +31,8 @@ func (c *Client) StartDirectConsumer() error {
 		}
 	}
 
-	interchainCh := make(chan *BrokerDirectThrowInterchainEvent, 1024)
-	receiptCh := make(chan *BrokerDirectThrowReceiptEvent, 1024)
+	interchainCh := make(chan *direct.BrokerDirectThrowInterchainEvent, 1024)
+	receiptCh := make(chan *direct.BrokerDirectThrowReceiptEvent, 1024)
 	_, err := c.sessionDirect.Contract.WatchThrowInterchainEvent(nil, interchainCh)
 	if err != nil {
 		return fmt.Errorf("watch event: %s", err)

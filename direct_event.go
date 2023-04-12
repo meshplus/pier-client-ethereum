@@ -6,9 +6,10 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/meshplus/bitxhub-model/pb"
+	"github.com/meshplus/pier-client-ethereum/direct"
 )
 
-func (c *Client) Convert2DirectIBTP(ev *BrokerDirectThrowInterchainEvent, timeoutHeight int64) (*pb.IBTP, error) {
+func (c *Client) Convert2DirectIBTP(ev *direct.BrokerDirectThrowInterchainEvent, timeoutHeight int64) (*pb.IBTP, error) {
 	fullEv, encrypt, err := c.fillDirectInterchainEvent(ev)
 	if err != nil {
 		return nil, err
@@ -29,7 +30,7 @@ func (c *Client) Convert2DirectIBTP(ev *BrokerDirectThrowInterchainEvent, timeou
 	}, nil
 }
 
-func (c *Client) Convert2DirectReceipt(ev *BrokerDirectThrowReceiptEvent) (*pb.IBTP, error) {
+func (c *Client) Convert2DirectReceipt(ev *direct.BrokerDirectThrowReceiptEvent) (*pb.IBTP, error) {
 	fullEv, encrypt, err := c.fillDirectReceiptEvent(ev)
 	if err != nil {
 		return nil, err
@@ -38,7 +39,7 @@ func (c *Client) Convert2DirectReceipt(ev *BrokerDirectThrowReceiptEvent) (*pb.I
 	return generateReceipt(fullEv.SrcFullID, fullEv.DstFullID, fullEv.Index, fullEv.Results, fullEv.Typ, encrypt, fullEv.MultiStatus)
 }
 
-func encodeDirectPayload(ev *BrokerDirectThrowInterchainEvent, encrypt bool) ([]byte, error) {
+func encodeDirectPayload(ev *direct.BrokerDirectThrowInterchainEvent, encrypt bool) ([]byte, error) {
 	var args [][]byte
 	args = append(args, ev.Args...)
 	//for _, arg := range ev.Args {
@@ -61,7 +62,7 @@ func encodeDirectPayload(ev *BrokerDirectThrowInterchainEvent, encrypt bool) ([]
 	return ibtppd.Marshal()
 }
 
-func (c *Client) fillDirectInterchainEvent(ev *BrokerDirectThrowInterchainEvent) (*BrokerDirectThrowInterchainEvent, bool, error) {
+func (c *Client) fillDirectInterchainEvent(ev *direct.BrokerDirectThrowInterchainEvent) (*direct.BrokerDirectThrowInterchainEvent, bool, error) {
 	if ev.Func == "" {
 		fun, args, encrypt, _, err := c.sessionDirect.GetOutMessage(pb.GenServicePair(ev.SrcFullID, ev.DstFullID), ev.Index)
 		if err != nil {
@@ -88,7 +89,7 @@ func (c *Client) fillDirectInterchainEvent(ev *BrokerDirectThrowInterchainEvent)
 	return ev, false, nil
 }
 
-func (c *Client) fillDirectReceiptEvent(ev *BrokerDirectThrowReceiptEvent) (*BrokerDirectThrowReceiptEvent, bool, error) {
+func (c *Client) fillDirectReceiptEvent(ev *direct.BrokerDirectThrowReceiptEvent) (*direct.BrokerDirectThrowReceiptEvent, bool, error) {
 	if ev.Results == nil {
 		results, typ, encrypt, multiStatus, err := c.sessionDirect.GetReceiptMessage(pb.GenServicePair(ev.SrcFullID, ev.DstFullID), ev.Index)
 		if err != nil {

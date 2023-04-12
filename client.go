@@ -24,18 +24,20 @@ import (
 	"github.com/hashicorp/go-hclog"
 	"github.com/meshplus/bitxhub-core/agency"
 	"github.com/meshplus/bitxhub-model/pb"
+	"github.com/meshplus/pier-client-ethereum/direct"
+	"github.com/meshplus/pier-client-ethereum/relay"
 )
 
-//go:generate abigen --sol ./example/broker.sol --pkg main --out broker.go
-//go:generate abigen --sol ./example/broker_direct.sol --pkg main --out broker_direct.go
+//go:generate abigen --sol ./example/broker.sol --pkg main --out ./relay/broker.go
+//go:generate abigen --sol ./example/broker_direct.sol --pkg main --out ./direct/broker_direct.go
 type Client struct {
 	abi           abi.ABI
 	config        *Config
 	ctx           context.Context
 	cancel        context.CancelFunc
 	ethClient     *ethclient.Client
-	session       *BrokerSession
-	sessionDirect *BrokerDirectSession
+	session       *relay.BrokerSession
+	sessionDirect *direct.BrokerDirectSession
 	eventC        chan *pb.IBTP
 	reqCh         chan *pb.GetDataRequest
 	lock          sync.Mutex
@@ -107,11 +109,11 @@ func (c *Client) Initialize(configPath string, _ []byte, mode string) error {
 	}
 	auth.Value = nil
 	if mode == relayMode {
-		broker, err := NewBroker(common.HexToAddress(cfg.Ether.ContractAddress), etherCli)
+		broker, err := relay.NewBroker(common.HexToAddress(cfg.Ether.ContractAddress), etherCli)
 		if err != nil {
 			return fmt.Errorf("failed to instantiate a Broker contract: %w", err)
 		}
-		session := &BrokerSession{
+		session := &relay.BrokerSession{
 			Contract: broker,
 			CallOpts: bind.CallOpts{
 				Pending: false,
@@ -120,11 +122,11 @@ func (c *Client) Initialize(configPath string, _ []byte, mode string) error {
 		}
 		c.session = session
 	} else {
-		broker, err := NewBrokerDirect(common.HexToAddress(cfg.Ether.ContractAddress), etherCli)
+		broker, err := direct.NewBrokerDirect(common.HexToAddress(cfg.Ether.ContractAddress), etherCli)
 		if err != nil {
 			return fmt.Errorf("failed to instantiate a Broker contract: %w", err)
 		}
-		sessionDirect := &BrokerDirectSession{
+		sessionDirect := &direct.BrokerDirectSession{
 			Contract: broker,
 			CallOpts: bind.CallOpts{
 				Pending: false,
@@ -134,7 +136,7 @@ func (c *Client) Initialize(configPath string, _ []byte, mode string) error {
 		c.sessionDirect = sessionDirect
 	}
 
-	ab, err := abi.JSON(bytes.NewReader([]byte(BrokerABI)))
+	ab, err := abi.JSON(bytes.NewReader([]byte(relay.BrokerABI)))
 	if err != nil {
 		return fmt.Errorf("abi unmarshal: %s", err.Error())
 	}
@@ -413,7 +415,7 @@ func (c *Client) invokeReceipt(srcAddr string, dstFullID string, index uint64, r
 	var txErr error
 	if err := retry.Retry(func(attempt uint) error {
 		if c.session == nil {
-			tx, txErr = c.sessionDirect.InvokeReceipt(srcAddr, dstFullID, index, reqType, results, txStatus, multiSign)
+			tx, txErr = c.sessionDirect.InvokeReceipt(srcAddr, dstFullID, index, reqType, results, multiStatus, txStatus, multiSign)
 		} else {
 			tx, txErr = c.session.InvokeReceipt(srcAddr, dstFullID, index, reqType, results, multiStatus, txStatus, multiSign)
 		}
@@ -495,7 +497,7 @@ func (c *Client) GetOutMessage(servicePair string, idx uint64) (*pb.IBTP, error)
 	}
 
 	if c.session == nil {
-		ev := &BrokerDirectThrowInterchainEvent{
+		ev := &direct.BrokerDirectThrowInterchainEvent{
 			Index:     idx,
 			DstFullID: dstService,
 			SrcFullID: srcService,
@@ -503,7 +505,7 @@ func (c *Client) GetOutMessage(servicePair string, idx uint64) (*pb.IBTP, error)
 
 		return c.Convert2DirectIBTP(ev, int64(c.config.Ether.TimeoutHeight))
 	} else {
-		ev := &BrokerThrowInterchainEvent{
+		ev := &relay.BrokerThrowInterchainEvent{
 			Index:     idx,
 			DstFullID: dstService,
 			SrcFullID: srcService,

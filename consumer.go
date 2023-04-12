@@ -3,10 +3,12 @@ package main
 
 import (
 	"fmt"
+
+	"github.com/meshplus/pier-client-ethereum/relay"
 )
 
 func (c *Client) StartConsumer() error {
-	loop := func(interchainCh chan *BrokerThrowInterchainEvent, receiptCh chan *BrokerThrowReceiptEvent) {
+	loop := func(interchainCh chan *relay.BrokerThrowInterchainEvent, receiptCh chan *relay.BrokerThrowReceiptEvent) {
 		for {
 			select {
 			case interchainEv := <-interchainCh:
@@ -29,8 +31,8 @@ func (c *Client) StartConsumer() error {
 		}
 	}
 
-	interchainCh := make(chan *BrokerThrowInterchainEvent, 1024)
-	receiptCh := make(chan *BrokerThrowReceiptEvent, 1024)
+	interchainCh := make(chan *relay.BrokerThrowInterchainEvent, 1024)
+	receiptCh := make(chan *relay.BrokerThrowReceiptEvent, 1024)
 	_, err := c.session.Contract.WatchThrowInterchainEvent(nil, interchainCh)
 	if err != nil {
 		return fmt.Errorf("watch event: %s", err)
