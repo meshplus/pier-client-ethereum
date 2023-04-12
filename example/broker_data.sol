@@ -265,6 +265,18 @@ contract BrokerData is IBroker {
         return (receipt.results, receipt.typ, receipt.encrypt, receipt.multiStatus);
     }
 
+    function getReceiptStatus(string memory inServicePair, uint64 idx) external view onlyBroker override returns (bool) {
+        bool[] memory multiStatus = receiptMessages[inServicePair][idx].multiStatus;
+        bool status = false;
+        for (uint i = 0; i < multiStatus.length; i++) {
+            if (multiStatus[i]) {
+                status = true;
+            }
+        }
+
+        return status;
+    }
+
     function getInnerMeta() external view onlyBroker override returns (string[] memory, uint64[] memory) {
         uint64[] memory indices = new uint64[](inServicePairs.length);
         for (uint i = 0; i < inServicePairs.length; i++) {

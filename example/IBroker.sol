@@ -66,6 +66,8 @@ interface IBroker {
 
     function getReceiptMessage(string memory inServicePair, uint64 idx) external view returns (bytes[][] memory, uint64, bool, bool[] memory);
 
+    function getReceiptStatus(string memory inServicePair, uint64 idx) external view returns (bool);
+
     function getInnerMeta() external view returns (string[] memory, uint64[] memory);
 
     function getCallbackMeta() external view returns (string[] memory, uint64[] memory);
