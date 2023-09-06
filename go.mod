@@ -5,7 +5,7 @@ go 1.13
 require (
 	github.com/Rican7/retry v0.1.0
 	github.com/StackExchange/wmi v1.2.1 // indirect
-	github.com/ethereum/go-ethereum v1.10.8
+	github.com/ethereum/go-ethereum v1.12.1
 	github.com/fatih/color v1.9.0
 	github.com/gobuffalo/packd v1.0.1
 	github.com/gobuffalo/packr/v2 v2.8.3
